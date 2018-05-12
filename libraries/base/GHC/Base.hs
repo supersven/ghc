@@ -1176,7 +1176,7 @@ The rules for map work like this.
 --              append
 ----------------------------------------------
 
--- | Append two lists, i.e.,
+-- | /O(n)/ where n is the length of the first list. Append two lists, i.e.,
 --
 -- > [x1, ..., xm] ++ [y1, ..., yn] == [x1, ..., xm, y1, ..., yn]
 -- > [x1, ..., xm] ++ [y1, ...] == [x1, ..., xm, y1, ...]
