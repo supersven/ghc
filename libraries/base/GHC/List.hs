@@ -516,7 +516,7 @@ cycle                   :: [a] -> [a]
 cycle []                = errorEmptyList "cycle"
 cycle xs                = xs' where xs' = xs ++ xs'
 
--- | 'takeWhile', applied to a predicate @p@ and a list @xs@, returns the
+-- | /O(n)/ 'takeWhile', applied to a predicate @p@ and a list @xs@, returns the
 -- longest prefix (possibly empty) of @xs@ of elements that satisfy @p@:
 --
 -- > takeWhile (< 3) [1,2,3,4,1,2,3,4] == [1,2]
@@ -550,7 +550,7 @@ takeWhileFB p c n = \x r -> if p x then x `c` r else n
                         takeWhileFB (\x -> q x && p x) c n
  #-}
 
--- | 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@:
+-- | /O(n)/ 'dropWhile' @p xs@ returns the suffix remaining after 'takeWhile' @p xs@:
 --
 -- > dropWhile (< 3) [1,2,3,4,5,1,2,3] == [3,4,5,1,2,3]
 -- > dropWhile (< 9) [1,2,3] == []
@@ -730,7 +730,7 @@ break p xs@(x:xs')
            | otherwise  =  let (ys,zs) = break p xs' in (x:ys,zs)
 #endif
 
--- | 'reverse' @xs@ returns the elements of @xs@ in reverse order.
+-- | /O(n)/ 'reverse' @xs@ returns the elements of @xs@ in reverse order.
 -- @xs@ must be finite.
 reverse                 :: [a] -> [a]
 #if defined(USE_REPORT_PRELUDE)

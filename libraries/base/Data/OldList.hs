@@ -507,7 +507,7 @@ intersectBy _  [] _     =  []
 intersectBy _  _  []    =  []
 intersectBy eq xs ys    =  [x | x <- xs, any (eq x) ys]
 
--- | The 'intersperse' function takes an element and a list and
+-- | /O(n)/ The 'intersperse' function takes an element and a list and
 -- \`intersperses\' that element between the elements of the list.
 -- For example,
 --
