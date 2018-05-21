@@ -317,8 +317,9 @@ findIndices p ls = build $ \c n ->
   in foldr go (\_ -> n) ls 0#
 #endif  /* USE_REPORT_PRELUDE */
 
--- | The 'isPrefixOf' function takes two lists and returns 'True'
--- iff the first list is a prefix of the second.
+-- | /O(n)/ where n is the 'length' of the shorter of both lists.
+-- The 'isPrefixOf' function takes two lists and returns 'True' iff the first
+-- list is a prefix of the second.
 --
 -- >>> "Hello" `isPrefixOf` "Hello World!"
 -- True

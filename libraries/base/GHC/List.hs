@@ -846,7 +846,7 @@ notElem x (y:ys)=  x /= y && notElem x ys
  #-}
 #endif
 
--- | 'lookup' @key assocs@ looks up a key in an association list.
+-- | /O(n)/ 'lookup' @key assocs@ looks up a key in an association list.
 lookup                  :: (Eq a) => a -> [(a,b)] -> Maybe b
 lookup _key []          =  Nothing
 lookup  key ((x,y):xys)
@@ -946,9 +946,9 @@ foldr2_left  k _z  x  r (y:ys) = k x y (r ys)
 -- Zips for larger tuples are in the List module.
 
 ----------------------------------------------
--- | 'zip' takes two lists and returns a list of corresponding pairs.
--- If one input list is short, excess elements of the longer list are
--- discarded.
+-- | /O(n)/ where n is the 'length' of the shorter of both lists. 'zip' takes
+-- two lists and returns a list of corresponding pairs. If one input list is
+-- short, excess elements of the longer list are discarded.
 --
 -- 'zip' is right-lazy:
 --
@@ -969,8 +969,8 @@ zipFB c = \x y r -> (x,y) `c` r
  #-}
 
 ----------------------------------------------
--- | 'zip3' takes three lists and returns a list of triples, analogous to
--- 'zip'.
+-- | /O(n)/ where n is the 'length' of the shortest of the three lists. 'zip3'
+-- takes three lists and returns a list of triples, analogous to 'zip'.
 zip3 :: [a] -> [b] -> [c] -> [(a,b,c)]
 -- Specification
 -- zip3 =  zipWith3 (,,)
@@ -982,8 +982,9 @@ zip3 _      _      _      = []
 -- function given as the first argument, instead of a tupling function.
 
 ----------------------------------------------
--- | 'zipWith' generalises 'zip' by zipping with the function given
--- as the first argument, instead of a tupling function.
+-- | /O(n)/ where n is the 'length' of the shorter of both lists. 'zipWith'
+-- generalises 'zip' by zipping with the function given as the first argument,
+-- instead of a tupling function.
 -- For example, @'zipWith' (+)@ is applied to two lists to produce the
 -- list of corresponding sums.
 --
@@ -1009,9 +1010,10 @@ zipWithFB c f = \x y r -> (x `f` y) `c` r
 "zipWithList"   [1]  forall f.  foldr2 (zipWithFB (:) f) [] = zipWith f
   #-}
 
--- | The 'zipWith3' function takes a function which combines three
--- elements, as well as three lists and returns a list of their point-wise
--- combination, analogous to 'zipWith'.
+-- | /O(n)/ where n is the 'length' of the shortest of the three lists.
+-- The 'zipWith3' function takes a function which combines three elements, as
+-- well as three lists and returns a list of their point-wise combination,
+-- analogous to 'zipWith'.
 zipWith3                :: (a->b->c->d) -> [a]->[b]->[c]->[d]
 zipWith3 z = go
   where
