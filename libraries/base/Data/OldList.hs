@@ -241,7 +241,7 @@ infix 5 \\ -- comment to fool cpp: https://www.haskell.org/ghc/docs/latest/html/
 dropWhileEnd :: (a -> Bool) -> [a] -> [a]
 dropWhileEnd p = foldr (\x xs -> if p x && null xs then [] else x : xs) []
 
--- | The 'stripPrefix' function drops the given prefix from a list.
+-- | /O(min(n,m))/ The 'stripPrefix' function drops the given prefix from a list.
 -- It returns 'Nothing' if the list did not start with the prefix
 -- given, or 'Just' the list after the prefix, if it does.
 --
@@ -430,7 +430,7 @@ elem_by eq y (x:xs)     =  x `eq` y || elem_by eq y xs
 #endif
 
 
--- | 'delete' @x@ removes the first occurrence of @x@ from its list argument.
+-- | /O(n)/ 'delete' @x@ removes the first occurrence of @x@ from its list argument.
 -- For example,
 --
 -- >>> delete 'a' "banana"
@@ -441,7 +441,7 @@ elem_by eq y (x:xs)     =  x `eq` y || elem_by eq y xs
 delete                  :: (Eq a) => a -> [a] -> [a]
 delete                  =  deleteBy (==)
 
--- | The 'deleteBy' function behaves like 'delete', but takes a
+-- | /O(n)/ The 'deleteBy' function behaves like 'delete', but takes a
 -- user-supplied equality predicate.
 --
 -- >>> deleteBy (<=) 4 [1..10]
@@ -617,7 +617,7 @@ mapAccumR f s (x:xs)    =  (s'', y:ys)
                            where (s'',y ) = f s' x
                                  (s', ys) = mapAccumR f s xs
 
--- | The 'insert' function takes an element and a list and inserts the
+-- | /O(n)/ The 'insert' function takes an element and a list and inserts the
 -- element into the list at the first position where it is less
 -- than or equal to the next element.  In particular, if the list
 -- is sorted before the call, the result will also be sorted.
@@ -669,7 +669,7 @@ minimumBy cmp xs        =  foldl1 minBy xs
                                        GT -> y
                                        _  -> x
 
--- | The 'genericLength' function is an overloaded version of 'length'.  In
+-- | /O(n)/ The 'genericLength' function is an overloaded version of 'length'.  In
 -- particular, instead of returning an 'Int', it returns any type which is
 -- an instance of 'Num'.  It is, however, less efficient than 'length'.
 genericLength           :: (Num i) => [a] -> i
@@ -688,15 +688,16 @@ strictGenericLength l   =  gl l 0
                            gl [] a     = a
                            gl (_:xs) a = let a' = a + 1 in a' `seq` gl xs a'
 
--- | The 'genericTake' function is an overloaded version of 'take', which
--- accepts any 'Integral' value as the number of elements to take.
+-- | /O(min(n,length(xs)))/ The 'genericTake' function is an overloaded version
+-- of 'take', which accepts any 'Integral' value as the number of elements to take.
 genericTake             :: (Integral i) => i -> [a] -> [a]
 genericTake n _ | n <= 0 = []
 genericTake _ []        =  []
 genericTake n (x:xs)    =  x : genericTake (n-1) xs
 
--- | The 'genericDrop' function is an overloaded version of 'drop', which
--- accepts any 'Integral' value as the number of elements to drop.
+-- | /O(min(n,length(xs)))/ The 'genericDrop' function is an overloaded version
+-- of 'drop', which accepts any 'Integral' value as the number of elements to
+-- drop.
 genericDrop             :: (Integral i) => i -> [a] -> [a]
 genericDrop n xs | n <= 0 = xs
 genericDrop _ []        =  []
@@ -711,7 +712,7 @@ genericSplitAt _ []     =  ([],[])
 genericSplitAt n (x:xs) =  (x:xs',xs'') where
     (xs',xs'') = genericSplitAt (n-1) xs
 
--- | The 'genericIndex' function is an overloaded version of '!!', which
+-- | /O(n)/ The 'genericIndex' function is an overloaded version of '!!', which
 -- accepts any 'Integral' value as the index.
 genericIndex :: (Integral i) => [a] -> i -> a
 genericIndex (x:_)  0 = x

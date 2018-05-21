@@ -630,7 +630,7 @@ takeFB c n x xs
             _ -> x `c` xs (m - 1)
 #endif
 
--- | 'drop' @n xs@ returns the suffix of @xs@
+-- | /O(min(n,length(xs)))/ 'drop' @n xs@ returns the suffix of @xs@
 -- after the first @n@ elements, or @[]@ if @n > 'length' xs@:
 --
 -- > drop 6 "Hello World!" == "World!"
@@ -693,9 +693,9 @@ splitAt n ls
             (xs', xs'') = splitAt' (m - 1) xs
 #endif /* USE_REPORT_PRELUDE */
 
--- | 'span', applied to a predicate @p@ and a list @xs@, returns a tuple where
--- first element is longest prefix (possibly empty) of @xs@ of elements that
--- satisfy @p@ and second element is the remainder of the list:
+-- | /O(n)/ 'span', applied to a predicate @p@ and a list @xs@, returns a tuple
+-- where first element is longest prefix (possibly empty) of @xs@ of elements
+-- that satisfy @p@ and second element is the remainder of the list:
 --
 -- > span (< 3) [1,2,3,4,1,2,3,4] == ([1,2],[3,4,1,2,3,4])
 -- > span (< 9) [1,2,3] == ([1,2,3],[])
@@ -709,9 +709,9 @@ span p xs@(x:xs')
          | p x          =  let (ys,zs) = span p xs' in (x:ys,zs)
          | otherwise    =  ([],xs)
 
--- | 'break', applied to a predicate @p@ and a list @xs@, returns a tuple where
--- first element is longest prefix (possibly empty) of @xs@ of elements that
--- /do not satisfy/ @p@ and second element is the remainder of the list:
+-- | /O(n)/ 'break', applied to a predicate @p@ and a list @xs@, returns a tuple
+-- where first element is longest prefix (possibly empty) of @xs@ of elements
+-- that /do not satisfy/ @p@ and second element is the remainder of the list:
 --
 -- > break (> 3) [1,2,3,4,1,2,3,4] == ([1,2,3],[4,1,2,3,4])
 -- > break (< 9) [1,2,3] == ([],[1,2,3])
