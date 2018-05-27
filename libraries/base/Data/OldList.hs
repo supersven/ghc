@@ -317,9 +317,8 @@ findIndices p ls = build $ \c n ->
   in foldr go (\_ -> n) ls 0#
 #endif  /* USE_REPORT_PRELUDE */
 
--- | /O(n)/ where n is the 'length' of the shorter of both lists.
--- The 'isPrefixOf' function takes two lists and returns 'True' iff the first
--- list is a prefix of the second.
+-- | /O(min(m,n)/ The 'isPrefixOf' function takes two lists and returns 'True'
+-- iff the first list is a prefix of the second.
 --
 -- >>> "Hello" `isPrefixOf` "Hello World!"
 -- True
@@ -704,8 +703,9 @@ genericDrop _ []        =  []
 genericDrop n (_:xs)    =  genericDrop (n-1) xs
 
 
--- | The 'genericSplitAt' function is an overloaded version of 'splitAt', which
--- accepts any 'Integral' value as the position at which to split.
+-- | /O(min(n,length(xs)))/ The 'genericSplitAt' function is an overloaded
+-- version of 'splitAt', which accepts any 'Integral' value as the position at
+-- which to split.
 genericSplitAt          :: (Integral i) => i -> [a] -> ([a], [a])
 genericSplitAt n xs | n <= 0 =  ([],xs)
 genericSplitAt _ []     =  ([],[])
@@ -726,57 +726,57 @@ genericIndex _ _      = errorWithoutStackTrace "List.genericIndex: index too lar
 genericReplicate        :: (Integral i) => i -> a -> [a]
 genericReplicate n x    =  genericTake n (repeat x)
 
--- | The 'zip4' function takes four lists and returns a list of
--- quadruples, analogous to 'zip'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zip4' function
+-- takes four lists and returns a list of quadruples, analogous to 'zip'.
 zip4                    :: [a] -> [b] -> [c] -> [d] -> [(a,b,c,d)]
 zip4                    =  zipWith4 (,,,)
 
--- | The 'zip5' function takes five lists and returns a list of
--- five-tuples, analogous to 'zip'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zip5' function
+-- takes five lists and returns a list of five-tuples, analogous to 'zip'.
 zip5                    :: [a] -> [b] -> [c] -> [d] -> [e] -> [(a,b,c,d,e)]
 zip5                    =  zipWith5 (,,,,)
 
--- | The 'zip6' function takes six lists and returns a list of six-tuples,
--- analogous to 'zip'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zip6' function
+-- takes six lists and returns a list of six-tuples, analogous to 'zip'.
 zip6                    :: [a] -> [b] -> [c] -> [d] -> [e] -> [f] ->
                               [(a,b,c,d,e,f)]
 zip6                    =  zipWith6 (,,,,,)
 
--- | The 'zip7' function takes seven lists and returns a list of
--- seven-tuples, analogous to 'zip'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zip7' function
+-- takes seven lists and returns a list of seven-tuples, analogous to 'zip'.
 zip7                    :: [a] -> [b] -> [c] -> [d] -> [e] -> [f] ->
                               [g] -> [(a,b,c,d,e,f,g)]
 zip7                    =  zipWith7 (,,,,,,)
 
--- | The 'zipWith4' function takes a function which combines four
--- elements, as well as four lists and returns a list of their point-wise
--- combination, analogous to 'zipWith'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zipWith4' function
+-- takes a function which combines four elements, as well as four lists and
+-- returns a list of their point-wise combination, analogous to 'zipWith'.
 zipWith4                :: (a->b->c->d->e) -> [a]->[b]->[c]->[d]->[e]
 zipWith4 z (a:as) (b:bs) (c:cs) (d:ds)
                         =  z a b c d : zipWith4 z as bs cs ds
 zipWith4 _ _ _ _ _      =  []
 
--- | The 'zipWith5' function takes a function which combines five
--- elements, as well as five lists and returns a list of their point-wise
--- combination, analogous to 'zipWith'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zipWith5' function
+-- takes a function which combines five elements, as well as five lists and
+-- returns a list of their point-wise combination, analogous to 'zipWith'.
 zipWith5                :: (a->b->c->d->e->f) ->
                            [a]->[b]->[c]->[d]->[e]->[f]
 zipWith5 z (a:as) (b:bs) (c:cs) (d:ds) (e:es)
                         =  z a b c d e : zipWith5 z as bs cs ds es
 zipWith5 _ _ _ _ _ _    = []
 
--- | The 'zipWith6' function takes a function which combines six
--- elements, as well as six lists and returns a list of their point-wise
--- combination, analogous to 'zipWith'.
+-- | /O(n)/  where n is the length of the shortest list. The 'zipWith6' function
+-- takes a function which combines six elements, as well as six lists and
+-- returns a list of their point-wise combination, analogous to 'zipWith'.
 zipWith6                :: (a->b->c->d->e->f->g) ->
                            [a]->[b]->[c]->[d]->[e]->[f]->[g]
 zipWith6 z (a:as) (b:bs) (c:cs) (d:ds) (e:es) (f:fs)
                         =  z a b c d e f : zipWith6 z as bs cs ds es fs
 zipWith6 _ _ _ _ _ _ _  = []
 
--- | The 'zipWith7' function takes a function which combines seven
--- elements, as well as seven lists and returns a list of their point-wise
--- combination, analogous to 'zipWith'.
+-- | /O(n)/ where n is the length of the shortest list. The 'zipWith7' function
+-- takes a function which combines seven elements, as well as seven lists and
+-- returns a list of their point-wise combination, analogous to 'zipWith'.
 zipWith7                :: (a->b->c->d->e->f->g->h) ->
                            [a]->[b]->[c]->[d]->[e]->[f]->[g]->[h]
 zipWith7 z (a:as) (b:bs) (c:cs) (d:ds) (e:es) (f:fs) (g:gs)
