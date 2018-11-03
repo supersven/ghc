@@ -2,6 +2,9 @@
 -- is reflected by calling the monadic 'fail', not by a
 -- runtime exception
 
+{-# LANGUAGE NoMonadFailDesugaring #-}
+{-# OPTIONS -Wno-missing-monadfail-instances #-}
+
 import Control.Monad
 import Data.Maybe
 

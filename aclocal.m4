@@ -217,7 +217,7 @@ AC_DEFUN([FPTOOLS_SET_HASKELL_PLATFORM_VARS],
         mipsel)
             test -z "[$]2" || eval "[$]2=ArchMipsel"
             ;;
-        hppa|hppa1_1|ia64|m68k|nios2|rs6000|s390|s390x|sh4|vax)
+        hppa|hppa1_1|ia64|m68k|nios2|riscv32|riscv64|rs6000|s390|s390x|sh4|vax)
             test -z "[$]2" || eval "[$]2=ArchUnknown"
             ;;
         *)
@@ -651,6 +651,14 @@ AC_DEFUN([FPTOOLS_SET_C_LD_FLAGS],
         $3="$$3 -D_HPUX_SOURCE"
         $5="$$5 -D_HPUX_SOURCE"
         ;;
+
+    arm*freebsd*)
+        # On arm/freebsd, tell gcc to generate Arm
+        # instructions (ie not Thumb).
+        $2="$$2 -marm"
+        $3="$$3 -Wl,-z,noexecstack"
+        $4="$$4 -z noexecstack"
+        ;;
     arm*linux*)
         # On arm/linux and arm/android, tell gcc to generate Arm
         # instructions (ie not Thumb).
@@ -659,6 +667,10 @@ AC_DEFUN([FPTOOLS_SET_C_LD_FLAGS],
         $4="$$4 -z noexecstack"
         ;;
 
+    aarch64*freebsd*)
+        $3="$$3 -Wl,-z,noexecstack"
+        $4="$$4 -z noexecstack"
+        ;;
     aarch64*linux*)
         $3="$$3 -Wl,-z,noexecstack"
         $4="$$4 -z noexecstack"
@@ -1284,6 +1296,24 @@ AC_SUBST(GccIsClang)
 rm -f conftest.txt
 ])
 
+# FP_GCC_SUPPORTS__ATOMICS
+# ------------------------
+# Does gcc support the __atomic_* family of builtins?
+AC_DEFUN([FP_GCC_SUPPORTS__ATOMICS],
+[
+   AC_REQUIRE([AC_PROG_CC])
+   AC_MSG_CHECKING([whether GCC supports __atomic_ builtins])
+   echo 'int test(int *x) { int y; __atomic_load(x, &y, __ATOMIC_SEQ_CST); return y; }' > conftest.c
+   if $CC -c conftest.c > /dev/null 2>&1; then
+       CONF_GCC_SUPPORTS__ATOMICS=YES
+       AC_MSG_RESULT([yes])
+   else
+       CONF_GCC_SUPPORTS__ATOMICS=NO
+       AC_MSG_RESULT([no])
+   fi
+   rm -f conftest.c conftest.o
+])
+
 # FP_GCC_SUPPORTS_NO_PIE
 # ----------------------
 # Does gcc support the -no-pie option? If so we should pass it to gcc when
@@ -1506,7 +1536,7 @@ if test "$RELEASE" = "NO"; then
     if test -f VERSION_DATE; then
         PACKAGE_VERSION=${PACKAGE_VERSION}.`cat VERSION_DATE`
         AC_MSG_RESULT(given $PACKAGE_VERSION)
-    elif test -d .git; then
+    elif test -e .git; then
         changequote(, )dnl
         ver_posixtime=`git log -1 --pretty=format:%ct`
         ver_date=`perl -MPOSIX -e "print strftime('%Y%m%d', gmtime($ver_posixtime));"`
@@ -1534,7 +1564,7 @@ if test "$RELEASE" = "NO"; then
 fi
 
     AC_MSG_CHECKING([for GHC Git commit id])
-    if test -d .git; then
+    if test -e .git; then
         git_commit_id=`git rev-parse HEAD`
         if test -n "$git_commit_id" 2>&1 >/dev/null; then true; else
             AC_MSG_ERROR([failed to detect revision: check that git is in your path])
@@ -1866,6 +1896,12 @@ case "$1" in
   powerpc*)
     $2="powerpc"
     ;;
+  riscv64*)
+    $2="riscv64"
+    ;;
+  riscv|riscv32*)
+    $2="riscv32"
+    ;;
   rs6000)
     $2="rs6000"
     ;;
@@ -1902,6 +1938,10 @@ case "$1" in
 # converts the canonicalized target into someting llvm can understand
 AC_DEFUN([GHC_LLVM_TARGET], [
   case "$2-$3" in
+    *-freebsd*-gnueabihf)
+      llvm_target_vendor="unknown"
+      llvm_target_os="freebsd-gnueabihf"
+      ;;
     hardfloat-*eabi)
       llvm_target_vendor="unknown"
       llvm_target_os="$3""hf"
@@ -2395,7 +2435,7 @@ AC_DEFUN([FIND_LD],[
         # Fallback
         AC_CHECK_TARGET_TOOL([LD], [ld])
         # This isn't entirely safe since $LD may have been discovered to be
-        $ ld.gold, but what else can we do?
+        # ld.gold, but what else can we do?
         if test "x$LD_NO_GOLD" = "x"; then LD_NO_GOLD=$LD; fi
     }
 

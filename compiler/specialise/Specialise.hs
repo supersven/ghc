@@ -1346,7 +1346,7 @@ specCalls mb_mod env existing_rules calls_for_me fn rhs
                   = (inl_prag { inl_inline = NoUserInline }, noUnfolding)
 
                   | otherwise
-                  = (inl_prag, specUnfolding poly_tyvars spec_app
+                  = (inl_prag, specUnfolding dflags poly_tyvars spec_app
                                              arity_decrease fn_unf)
 
                 arity_decrease = length spec_dict_args
@@ -2011,6 +2011,7 @@ mkCallUDs' env f args
             EqPred {}       -> True
             IrredPred {}    -> True   -- Things like (D []) where D is a
                                       -- Constraint-ranged family; Trac #7785
+            ForAllPred {}   -> True
 
 {-
 Note [Type determines value]
@@ -2095,7 +2096,7 @@ mkDB bind = (bind, bind_fvs bind)
 -- | Identify the free variables of a 'CoreBind'
 bind_fvs :: CoreBind -> VarSet
 bind_fvs (NonRec bndr rhs) = pair_fvs (bndr,rhs)
-bind_fvs (Rec prs)         = foldl delVarSet rhs_fvs bndrs
+bind_fvs (Rec prs)         = foldl' delVarSet rhs_fvs bndrs
                            where
                              bndrs = map fst prs
                              rhs_fvs = unionVarSets (map pair_fvs prs)

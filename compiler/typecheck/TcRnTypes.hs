@@ -46,7 +46,7 @@ module TcRnTypes(
         pprTcTyThingCategory, pprPECategory, CompleteMatch(..),
 
         -- Desugaring types
-        DsM, DsLclEnv(..), DsGblEnv(..), PArrBuiltin(..),
+        DsM, DsLclEnv(..), DsGblEnv(..),
         DsMetaEnv, DsMetaVal(..), CompleteMatchMap,
         mkCompleteMatchMap, extendCompleteMatchMap,
 
@@ -64,11 +64,14 @@ module TcRnTypes(
         TcIdSigInst(..), TcPatSynInfo(..),
         isPartialSig, hasCompleteSig,
 
+        -- QCInst
+        QCInst(..), isPendingScInst,
+
         -- Canonical constraints
         Xi, Ct(..), Cts, emptyCts, andCts, andManyCts, pprCts,
         singleCt, listToCts, ctsElts, consCts, snocCts, extendCtsList,
         isEmptyCts, isCTyEqCan, isCFunEqCan,
-        isPendingScDict, superClassesMightHelp,
+        isPendingScDict, superClassesMightHelp, getPendingWantedScs,
         isCDictCan_Maybe, isCFunEqCan_maybe,
         isCNonCanonical, isWantedCt, isDerivedCt,
         isGivenCt, isHoleCt, isOutOfScopeCt, isExprHoleCt, isTypeHoleCt,
@@ -78,19 +81,20 @@ module TcRnTypes(
         mkNonCanonical, mkNonCanonicalCt, mkGivens,
         mkIrredCt, mkInsolubleCt,
         ctEvPred, ctEvLoc, ctEvOrigin, ctEvEqRel,
-        ctEvExpr, ctEvCoercion, ctEvEvId,
+        ctEvExpr, ctEvTerm, ctEvCoercion, ctEvEvId,
         tyCoVarsOfCt, tyCoVarsOfCts,
         tyCoVarsOfCtList, tyCoVarsOfCtsList,
 
         WantedConstraints(..), insolubleWC, emptyWC, isEmptyWC,
-        andWC, unionsWC, mkSimpleWC, mkImplicWC,
+        isSolvedWC, andWC, unionsWC, mkSimpleWC, mkImplicWC,
         addInsols, insolublesOnly, addSimples, addImplics,
         tyCoVarsOfWC, dropDerivedWC, dropDerivedSimples,
-        tyCoVarsOfWCList, insolubleWantedCt, insolubleEqCt,
+        tyCoVarsOfWCList, insolubleCt, insolubleEqCt,
         isDroppableCt, insolubleImplic,
         arisesFromGivens,
 
-        Implication(..), newImplication,
+        Implication(..), newImplication, implicationPrototype,
+        implicLclEnv, implicDynFlags,
         ImplicStatus(..), isInsolubleStatus, isSolvedStatus,
         SubGoalDepth, initialSubGoalDepth, maxSubGoalDepth,
         bumpSubGoalDepth, subGoalDepthExceeded,
@@ -106,7 +110,6 @@ module TcRnTypes(
 
 
         SkolemInfo(..), pprSigSkolInfo, pprSkolInfo,
-        termEvidenceAllowed,
 
         CtEvidence(..), TcEvDest(..),
         mkKindLoc, toKindLoc, mkGivenLoc,
@@ -114,6 +117,7 @@ module TcRnTypes(
         ctEvRole,
 
         wrapType, wrapTypeWithImplication,
+        removeBindingShadowing,
 
         -- Constraint solver plugins
         TcPlugin(..), TcPluginResult(..), TcPluginSolver,
@@ -270,8 +274,9 @@ type TcM  = TcRn
 -- the lcl type).
 data Env gbl lcl
   = Env {
-        env_top  :: HscEnv,  -- Top-level stuff that never changes
+        env_top  :: !HscEnv, -- Top-level stuff that never changes
                              -- Includes all info about imported things
+                             -- BangPattern is to fix leak, see #15111
 
         env_us   :: {-# UNPACK #-} !(IORef UniqSupply),
                              -- Unique supply for local variables
@@ -361,25 +366,6 @@ a @UniqueSupply@ and some annotations, which
 presumably include source-file location information:
 -}
 
--- If '-XParallelArrays' is given, the desugarer populates this table with the corresponding
--- variables found in 'Data.Array.Parallel'.
---
-data PArrBuiltin
-        = PArrBuiltin
-        { lengthPVar         :: Var     -- ^ lengthP
-        , replicatePVar      :: Var     -- ^ replicateP
-        , singletonPVar      :: Var     -- ^ singletonP
-        , mapPVar            :: Var     -- ^ mapP
-        , filterPVar         :: Var     -- ^ filterP
-        , zipPVar            :: Var     -- ^ zipP
-        , crossMapPVar       :: Var     -- ^ crossMapP
-        , indexPVar          :: Var     -- ^ (!:)
-        , emptyPVar          :: Var     -- ^ emptyP
-        , appPVar            :: Var     -- ^ (+:+)
-        , enumFromToPVar     :: Var     -- ^ enumFromToP
-        , enumFromThenToPVar :: Var     -- ^ enumFromThenToP
-        }
-
 data DsGblEnv
         = DsGblEnv
         { ds_mod          :: Module             -- For SCC profiling
@@ -388,11 +374,6 @@ data DsGblEnv
         , ds_msgs    :: IORef Messages          -- Warning messages
         , ds_if_env  :: (IfGblEnv, IfLclEnv)    -- Used for looking up global,
                                                 -- possibly-imported things
-        , ds_dph_env :: GlobalRdrEnv            -- exported entities of 'Data.Array.Parallel.Prim'
-                                                -- iff '-fvectorise' flag was given as well as
-                                                -- exported entities of 'Data.Array.Parallel' iff
-                                                -- '-XParallelArrays' was given; otherwise, empty
-        , ds_parr_bi :: PArrBuiltin             -- desugarer names for '-XParallelArrays'
         , ds_complete_matches :: CompleteMatchMap
            -- Additional complete pattern matches
         , ds_cc_st   :: IORef CostCentreState
@@ -405,9 +386,15 @@ instance ContainsModule DsGblEnv where
 data DsLclEnv = DsLclEnv {
         dsl_meta    :: DsMetaEnv,        -- Template Haskell bindings
         dsl_loc     :: RealSrcSpan,      -- To put in pattern-matching error msgs
-        dsl_dicts   :: Bag EvVar,        -- Constraints from GADT pattern-matching
-        dsl_tm_cs   :: Bag SimpleEq,
-        dsl_pm_iter :: IORef Int         -- no iterations for pmcheck
+
+        -- See Note [Note [Type and Term Equality Propagation] in Check.hs
+        -- These two fields are augmented as we walk inwards,
+        -- through each patttern match in turn
+        dsl_dicts   :: Bag EvVar,     -- Constraints from GADT pattern-matching
+        dsl_tm_cs   :: Bag SimpleEq,  -- Constraints form term-level pattern matching
+
+        dsl_pm_iter :: IORef Int  -- Number of iterations for pmcheck so far
+                                  -- We fail if this gets too big
      }
 
 -- Inside [| |] brackets, the desugarer looks
@@ -526,10 +513,12 @@ data TcGblEnv
                 -- bound in this module when dealing with hi-boot recursions
                 -- Updated at intervals (e.g. after dealing with types and classes)
 
-        tcg_inst_env     :: InstEnv,
+        tcg_inst_env     :: !InstEnv,
           -- ^ Instance envt for all /home-package/ modules;
           -- Includes the dfuns in tcg_insts
-        tcg_fam_inst_env :: FamInstEnv, -- ^ Ditto for family instances
+          -- NB. BangPattern is to fix a leak, see #15111
+        tcg_fam_inst_env :: !FamInstEnv, -- ^ Ditto for family instances
+          -- NB. BangPattern is to fix a leak, see #15111
         tcg_ann_env      :: AnnEnv,     -- ^ And for annotations
 
                 -- Now a bunch of things about this module that are simply
@@ -644,11 +633,10 @@ data TcGblEnv
         tcg_th_topnames :: TcRef NameSet,
         -- ^ Exact names bound in top-level declarations in tcg_th_topdecls
 
-        tcg_th_modfinalizers :: TcRef [TcM ()],
+        tcg_th_modfinalizers :: TcRef [(TcLclEnv, ThModFinalizers)],
         -- ^ Template Haskell module finalizers.
         --
-        -- They are computations in the @TcM@ monad rather than @Q@ because we
-        -- set them to use particular local environments.
+        -- They can use particular local environments.
 
         tcg_th_coreplugins :: TcRef [String],
         -- ^ Core plugins added by Template Haskell code.
@@ -675,12 +663,12 @@ data TcGblEnv
         tcg_fam_insts :: [FamInst],          -- ...Family instances
         tcg_rules     :: [LRuleDecl GhcTc],  -- ...Rules
         tcg_fords     :: [LForeignDecl GhcTc], -- ...Foreign import & exports
-        tcg_vects     :: [LVectDecl GhcTc],   -- ...Vectorisation declarations
         tcg_patsyns   :: [PatSyn],            -- ...Pattern synonyms
 
         tcg_doc_hdr   :: Maybe LHsDocString, -- ^ Maybe Haddock header docs
-        tcg_hpc       :: AnyHpcUsage,        -- ^ @True@ if any part of the
+        tcg_hpc       :: !AnyHpcUsage,       -- ^ @True@ if any part of the
                                              --  prog uses hpc instrumentation.
+           -- NB. BangPattern is to fix a leak, see #15111
 
         tcg_self_boot :: SelfBootInfo,       -- ^ Whether this module has a
                                              -- corresponding hi-boot file
@@ -932,6 +920,23 @@ instance HasOccName TcBinder where
     occName (TcIdBndr_ExpType name _ _) = occName name
     occName (TcTvBndr name _)           = occName name
 
+-- fixes #12177
+-- Builds up a list of bindings whose OccName has not been seen before
+-- i.e., If    ys  = removeBindingShadowing xs
+-- then
+--  - ys is obtained from xs by deleting some elements
+--  - ys has no duplicate OccNames
+--  - The first duplicated OccName in xs is retained in ys
+-- Overloaded so that it can be used for both GlobalRdrElt in typed-hole
+-- substitutions and TcBinder when looking for relevant bindings.
+removeBindingShadowing :: HasOccName a => [a] -> [a]
+removeBindingShadowing bindings = reverse $ fst $ foldl
+    (\(bindingAcc, seenNames) binding ->
+    if occName binding `elemOccSet` seenNames -- if we've seen it
+        then (bindingAcc, seenNames)              -- skip it
+        else (binding:bindingAcc, extendOccSet seenNames (occName binding)))
+    ([], emptyOccSet) bindings
+
 ---------------------------
 -- Template Haskell stages and levels
 ---------------------------
@@ -1076,10 +1081,7 @@ data TcTyThing
       , tct_info :: IdBindingInfo   -- See Note [Meaning of IdBindingInfo]
       }
 
-  | ATyVar  Name TcTyVar        -- The type variable to which the lexically scoped type
-                                -- variable is bound. We only need the Name
-                                -- for error-message purposes; it is the corresponding
-                                -- Name in the domain of the envt
+  | ATyVar  Name TcTyVar   -- See Note [Type variables in the type environment]
 
   | ATcTyCon TyCon   -- Used temporarily, during kind checking, for the
                      -- tycons and clases in this recursive group
@@ -1097,6 +1099,10 @@ data PromotionErr
   | FamDataConPE     -- Data constructor for a data family
                      -- See Note [AFamDataCon: not promoting data family constructors]
                      -- in TcEnv.
+  | ConstrainedDataConPE PredType
+                     -- Data constructor with a non-equality context
+                     -- See Note [Don't promote data constructors with
+                     --           non-equality contexts] in TcHsType
   | PatSynPE         -- Pattern synonyms
                      -- See Note [Don't promote pattern synonyms] in TcEnv
 
@@ -1107,8 +1113,6 @@ data PromotionErr
                      -- See Note [Recursion and promoting data constructors] in TcTyClsDecls
   | NoDataKindsTC    -- -XDataKinds not enabled (for a tycon)
   | NoDataKindsDC    -- -XDataKinds not enabled (for a datacon)
-  | NoTypeInTypeTC   -- -XTypeInType not enabled (for a tycon)
-  | NoTypeInTypeDC   -- -XTypeInType not enabled (for a datacon)
 
 instance Outputable TcTyThing where     -- Debugging only
    ppr (AGlobal g)      = ppr g
@@ -1244,6 +1248,48 @@ variables have ClosedTypeId=True (or imported).  This is an extension
 compared to the JFP paper on OutsideIn, which used "top-level" as a
 proxy for "closed".  (It's not a good proxy anyway -- the MR can make
 a top-level binding with a free type variable.)
+
+Note [Type variables in the type environment]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The type environment has a binding for each lexically-scoped
+type variable that is in scope.  For example
+
+  f :: forall a. a -> a
+  f x = (x :: a)
+
+  g1 :: [a] -> a
+  g1 (ys :: [b]) = head ys :: b
+
+  g2 :: [Int] -> Int
+  g2 (ys :: [c]) = head ys :: c
+
+* The forall'd variable 'a' in the signature scopes over f's RHS.
+
+* The pattern-bound type variable 'b' in 'g1' scopes over g1's
+  RHS; note that it is bound to a skolem 'a' which is not itself
+  lexically in scope.
+
+* The pattern-bound type variable 'c' in 'g2' is bound to
+  Int; that is, pattern-bound type variables can stand for
+  arbitrary types. (see
+    GHC proposal #128 "Allow ScopedTypeVariables to refer to types"
+    https://github.com/ghc-proposals/ghc-proposals/pull/128,
+  and the paper
+    "Type variables in patterns", Haskell Symposium 2018.
+
+
+This is implemented by the constructor
+   ATyVar Name TcTyVar
+in the type environment.
+
+* The Name is the name of the original, lexically scoped type
+  variable
+
+* The TcTyVar is sometimes a skolem (like in 'f'), and sometimes
+  a unification variable (like in 'g1', 'g2').  We never zonk the
+  type environment so in the latter case it always stays as a
+  unification variable, although that variable may be later
+  unified with a type (such as Int in 'g2').
 -}
 
 instance Outputable IdBindingInfo where
@@ -1253,16 +1299,16 @@ instance Outputable IdBindingInfo where
     text "TopLevelLet" <+> ppr fvs <+> ppr closed_type
 
 instance Outputable PromotionErr where
-  ppr ClassPE        = text "ClassPE"
-  ppr TyConPE        = text "TyConPE"
-  ppr PatSynPE       = text "PatSynPE"
-  ppr PatSynExPE     = text "PatSynExPE"
-  ppr FamDataConPE   = text "FamDataConPE"
-  ppr RecDataConPE   = text "RecDataConPE"
-  ppr NoDataKindsTC  = text "NoDataKindsTC"
-  ppr NoDataKindsDC  = text "NoDataKindsDC"
-  ppr NoTypeInTypeTC = text "NoTypeInTypeTC"
-  ppr NoTypeInTypeDC = text "NoTypeInTypeDC"
+  ppr ClassPE                     = text "ClassPE"
+  ppr TyConPE                     = text "TyConPE"
+  ppr PatSynPE                    = text "PatSynPE"
+  ppr PatSynExPE                  = text "PatSynExPE"
+  ppr FamDataConPE                = text "FamDataConPE"
+  ppr (ConstrainedDataConPE pred) = text "ConstrainedDataConPE"
+                                      <+> parens (ppr pred)
+  ppr RecDataConPE                = text "RecDataConPE"
+  ppr NoDataKindsTC               = text "NoDataKindsTC"
+  ppr NoDataKindsDC               = text "NoDataKindsDC"
 
 pprTcTyThingCategory :: TcTyThing -> SDoc
 pprTcTyThingCategory (AGlobal thing)    = pprTyThingCategory thing
@@ -1272,16 +1318,15 @@ pprTcTyThingCategory (ATcTyCon {})     = text "Local tycon"
 pprTcTyThingCategory (APromotionErr pe) = pprPECategory pe
 
 pprPECategory :: PromotionErr -> SDoc
-pprPECategory ClassPE        = text "Class"
-pprPECategory TyConPE        = text "Type constructor"
-pprPECategory PatSynPE       = text "Pattern synonym"
-pprPECategory PatSynExPE     = text "Pattern synonym existential"
-pprPECategory FamDataConPE   = text "Data constructor"
-pprPECategory RecDataConPE   = text "Data constructor"
-pprPECategory NoDataKindsTC  = text "Type constructor"
-pprPECategory NoDataKindsDC  = text "Data constructor"
-pprPECategory NoTypeInTypeTC = text "Type constructor"
-pprPECategory NoTypeInTypeDC = text "Data constructor"
+pprPECategory ClassPE                = text "Class"
+pprPECategory TyConPE                = text "Type constructor"
+pprPECategory PatSynPE               = text "Pattern synonym"
+pprPECategory PatSynExPE             = text "Pattern synonym existential"
+pprPECategory FamDataConPE           = text "Data constructor"
+pprPECategory ConstrainedDataConPE{} = text "Data constructor"
+pprPECategory RecDataConPE           = text "Data constructor"
+pprPECategory NoDataKindsTC          = text "Type constructor"
+pprPECategory NoDataKindsDC          = text "Data constructor"
 
 {-
 ************************************************************************
@@ -1360,7 +1405,7 @@ data ImportAvails
 
 mkModDeps :: [(ModuleName, IsBootInterface)]
           -> ModuleNameEnv (ModuleName, IsBootInterface)
-mkModDeps deps = foldl add emptyUFM deps
+mkModDeps deps = foldl' add emptyUFM deps
                where
                  add env elt@(m,_) = addToUFM env m elt
 
@@ -1494,7 +1539,7 @@ data TcIdSigInst
   = TISI { sig_inst_sig :: TcIdSigInfo
 
          , sig_inst_skols :: [(Name, TcTyVar)]
-               -- Instantiated type and kind variables, SigTvs
+               -- Instantiated type and kind variables, TyVarTvs
                -- The Name is the Name that the renamer chose;
                --   but the TcTyVar may come from instantiating
                --   the type and hence have a different unique.
@@ -1557,7 +1602,7 @@ data TcPatSynInfo
         patsig_name           :: Name,
         patsig_implicit_bndrs :: [TyVarBinder], -- Implicitly-bound kind vars (Inferred) and
                                                 -- implicitly-bound type vars (Specified)
-          -- See Note [The pattern-synonym signature splitting rule] in TcSigs
+          -- See Note [The pattern-synonym signature splitting rule] in TcPatSyn
         patsig_univ_bndrs     :: [TyVar],       -- Bound by explicit user forall
         patsig_req            :: TcThetaType,
         patsig_ex_bndrs       :: [TyVar],       -- Bound by explicit user forall
@@ -1687,8 +1732,8 @@ data Ct
         --    *never* over-saturated (because if so
         --    we should have decomposed)
 
-      cc_fsk    :: TcTyVar  -- [Given]  always a FlatSkolTv
-                            -- [Wanted] always a FlatMetaTv
+      cc_fsk    :: TcTyVar  -- [G]  always a FlatSkolTv
+                            -- [W], [WD], or [D] always a FlatMetaTv
         -- See Note [The flattening story] in TcFlatten
     }
 
@@ -1703,6 +1748,26 @@ data Ct
       cc_hole :: Hole
     }
 
+  | CQuantCan QCInst       -- A quantified constraint
+      -- NB: I expect to make more of the cases in Ct
+      --     look like this, with the payload in an
+      --     auxiliary type
+
+------------
+data QCInst  -- A much simplified version of ClsInst
+             -- See Note [Quantified constraints] in TcCanonical
+  = QCI { qci_ev   :: CtEvidence -- Always of type forall tvs. context => ty
+                                 -- Always Given
+        , qci_tvs  :: [TcTyVar]  -- The tvs
+        , qci_pred :: TcPredType -- The ty
+        , qci_pend_sc :: Bool    -- Same as cc_pend_sc flag in CDictCan
+                                 -- Invariant: True => qci_pred is a ClassPred
+    }
+
+instance Outputable QCInst where
+  ppr (QCI { qci_ev = ev }) = ppr ev
+
+------------
 -- | An expression or type hole
 data Hole = ExprHole UnboundVar
             -- ^ Either an out-of-scope variable or a "true" hole in an
@@ -1743,7 +1808,7 @@ Example 1:  (c Int), where c :: * -> Constraint.  We can't do anything
 
 Example 2:  a ~ b, where a :: *, b :: k, where k is a kind variable
             We don't want to use this to substitute 'b' for 'a', in case
-            'k' is subequently unifed with (say) *->*, because then
+            'k' is subsequently unifed with (say) *->*, because then
             we'd have ill-kinded types floating about.  Rather we want
             to defer using the equality altogether until 'k' get resolved.
 
@@ -1789,7 +1854,8 @@ mkGivens loc ev_ids
                                        , ctev_loc = loc })
 
 ctEvidence :: Ct -> CtEvidence
-ctEvidence = cc_ev
+ctEvidence (CQuantCan (QCI { qci_ev = ev })) = ev
+ctEvidence ct = cc_ev ct
 
 ctLoc :: Ct -> CtLoc
 ctLoc = ctEvLoc . ctEvidence
@@ -1802,7 +1868,7 @@ ctOrigin = ctLocOrigin . ctLoc
 
 ctPred :: Ct -> PredType
 -- See Note [Ct/evidence invariant]
-ctPred ct = ctEvPred (cc_ev ct)
+ctPred ct = ctEvPred (ctEvidence ct)
 
 ctEvId :: Ct -> EvVar
 -- The evidence Id for this Ct
@@ -1827,7 +1893,7 @@ ctEqRel :: Ct -> EqRel
 ctEqRel = ctEvEqRel . ctEvidence
 
 instance Outputable Ct where
-  ppr ct = ppr (cc_ev ct) <+> parens pp_sort
+  ppr ct = ppr (ctEvidence ct) <+> parens pp_sort
     where
       pp_sort = case ct of
          CTyEqCan {}      -> text "CTyEqCan"
@@ -1840,6 +1906,9 @@ instance Outputable Ct where
             | insol     -> text "CIrredCan(insol)"
             | otherwise -> text "CIrredCan(sol)"
          CHoleCan { cc_hole = hole } -> text "CHoleCan:" <+> ppr hole
+         CQuantCan (QCI { qci_pend_sc = pend_sc })
+            | pend_sc   -> text "CQuantCan(psc)"
+            | otherwise -> text "CQuantCan"
 
 {-
 ************************************************************************
@@ -1870,9 +1939,7 @@ tyCoFVsOfCt (CFunEqCan { cc_tyargs = tys, cc_fsk = fsk })
   = tyCoFVsOfTypes tys `unionFV` FV.unitFV fsk
                        `unionFV` tyCoFVsOfType (tyVarKind fsk)
 tyCoFVsOfCt (CDictCan { cc_tyargs = tys }) = tyCoFVsOfTypes tys
-tyCoFVsOfCt (CIrredCan { cc_ev = ev }) = tyCoFVsOfType (ctEvPred ev)
-tyCoFVsOfCt (CHoleCan { cc_ev = ev }) = tyCoFVsOfType (ctEvPred ev)
-tyCoFVsOfCt (CNonCanonical { cc_ev = ev }) = tyCoFVsOfType (ctEvPred ev)
+tyCoFVsOfCt ct = tyCoFVsOfType (ctPred ct)
 
 -- | Returns free variables of a bag of constraints as a non-deterministic
 -- set. See Note [Deterministic FV] in FV.
@@ -2073,13 +2140,13 @@ NB: we keep *all* derived insolubles under some circumstances:
 -}
 
 isWantedCt :: Ct -> Bool
-isWantedCt = isWanted . cc_ev
+isWantedCt = isWanted . ctEvidence
 
 isGivenCt :: Ct -> Bool
-isGivenCt = isGiven . cc_ev
+isGivenCt = isGiven . ctEvidence
 
 isDerivedCt :: Ct -> Bool
-isDerivedCt = isDerived . cc_ev
+isDerivedCt = isDerived . ctEvidence
 
 isCTyEqCan :: Ct -> Bool
 isCTyEqCan (CTyEqCan {})  = True
@@ -2174,10 +2241,17 @@ isUserTypeErrorCt ct = case getUserTypeErrorMsg ct of
                          _      -> False
 
 isPendingScDict :: Ct -> Maybe Ct
--- Says whether cc_pend_sc is True, AND if so flips the flag
+-- Says whether this is a CDictCan with cc_pend_sc is True,
+-- AND if so flips the flag
 isPendingScDict ct@(CDictCan { cc_pend_sc = True })
                   = Just (ct { cc_pend_sc = False })
 isPendingScDict _ = Nothing
+
+isPendingScInst :: QCInst -> Maybe QCInst
+-- Same as isPrendinScDict, but for QCInsts
+isPendingScInst qci@(QCI { qci_pend_sc = True })
+                  = Just (qci { qci_pend_sc = False })
+isPendingScInst _ = Nothing
 
 setPendingScDict :: Ct -> Ct
 -- Set the cc_pend_sc flag to True
@@ -2185,15 +2259,30 @@ setPendingScDict ct@(CDictCan { cc_pend_sc = False })
                     = ct { cc_pend_sc = True }
 setPendingScDict ct = ct
 
-superClassesMightHelp :: Ct -> Bool
+superClassesMightHelp :: WantedConstraints -> Bool
 -- ^ True if taking superclasses of givens, or of wanteds (to perhaps
 -- expose more equalities or functional dependencies) might help to
 -- solve this constraint.  See Note [When superclasses help]
-superClassesMightHelp ct
-  = isWantedCt ct && not (is_ip ct)
+superClassesMightHelp (WC { wc_simple = simples, wc_impl = implics })
+  = anyBag might_help_ct simples || anyBag might_help_implic implics
   where
+    might_help_implic ic
+       | IC_Unsolved <- ic_status ic = superClassesMightHelp (ic_wanted ic)
+       | otherwise                   = False
+
+    might_help_ct ct = isWantedCt ct && not (is_ip ct)
+
     is_ip (CDictCan { cc_class = cls }) = isIPClass cls
     is_ip _                             = False
+
+getPendingWantedScs :: Cts -> ([Ct], Cts)
+getPendingWantedScs simples
+  = mapAccumBagL get [] simples
+  where
+    get acc ct | Just ct' <- isPendingScDict ct
+               = (ct':acc, ct')
+               | otherwise
+               = (acc,     ct)
 
 {- Note [When superclasses help]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2204,6 +2293,11 @@ for which expansion of superclasses (e.g. from given constraints)
 might actually help. The function superClassesMightHelp tells if
 doing this superclass expansion might help solve this constraint.
 Note that
+
+  * We look inside implications; maybe it'll help to expand the Givens
+    at level 2 to help solve an unsolved Wanted buried inside an
+    implication.  E.g.
+        forall a. Ord a => forall b. [W] Eq a
 
   * Superclasses help only for Wanted constraints.  Derived constraints
     are not really "unsolved" and we certainly don't want them to
@@ -2300,6 +2394,14 @@ isEmptyWC :: WantedConstraints -> Bool
 isEmptyWC (WC { wc_simple = f, wc_impl = i })
   = isEmptyBag f && isEmptyBag i
 
+
+-- | Checks whether a the given wanted constraints are solved, i.e.
+-- that there are no simple constraints left and all the implications
+-- are solved.
+isSolvedWC :: WantedConstraints -> Bool
+isSolvedWC WC {wc_simple = wc_simple, wc_impl = wc_impl} =
+  isEmptyBag wc_simple && allBag (isSolvedStatus . ic_status) wc_impl
+
 andWC :: WantedConstraints -> WantedConstraints -> WantedConstraints
 andWC (WC { wc_simple = f1, wc_impl = i1 })
       (WC { wc_simple = f2, wc_impl = i2 })
@@ -2324,7 +2426,7 @@ addInsols wc cts
 insolublesOnly :: WantedConstraints -> WantedConstraints
 -- Keep only the definitely-insoluble constraints
 insolublesOnly (WC { wc_simple = simples, wc_impl = implics })
-  = WC { wc_simple = filterBag insolubleWantedCt simples
+  = WC { wc_simple = filterBag insolubleCt simples
        , wc_impl   = mapBag implic_insols_only implics }
   where
     implic_insols_only implic
@@ -2344,16 +2446,19 @@ insolubleImplic ic = isInsolubleStatus (ic_status ic)
 
 insolubleWC :: WantedConstraints -> Bool
 insolubleWC (WC { wc_impl = implics, wc_simple = simples })
-  =  anyBag insolubleWantedCt simples
+  =  anyBag insolubleCt simples
   || anyBag insolubleImplic implics
 
-insolubleWantedCt :: Ct -> Bool
+insolubleCt :: Ct -> Bool
 -- Definitely insoluble, in particular /excluding/ type-hole constraints
-insolubleWantedCt ct
-  | isGivenCt ct     = False              -- See Note [Given insolubles]
-  | isHoleCt ct      = isOutOfScopeCt ct  -- See Note [Insoluble holes]
-  | insolubleEqCt ct = True
-  | otherwise        = False
+-- Namely: a) an equality constraint
+--         b) that is insoluble
+--         c) and does not arise from a Given
+insolubleCt ct
+  | isHoleCt ct            = isOutOfScopeCt ct  -- See Note [Insoluble holes]
+  | not (insolubleEqCt ct) = False
+  | arisesFromGivens ct    = False              -- See Note [Given insolubles]
+  | otherwise              = True
 
 insolubleEqCt :: Ct -> Bool
 -- Returns True of /equality/ constraints
@@ -2407,6 +2512,12 @@ because that'll suppress reports of [W] C b (f b).  But we
 may not report the insoluble [G] f b ~# b either (see Note [Given errors]
 in TcErrors), so we may fail to report anything at all!  Yikes.
 
+The same applies to Derived constraints that /arise from/ Givens.
+E.g.   f :: (C Int [a]) => blah
+where a fundep means we get
+       [D] Int ~ [a]
+By the same reasoning we must not suppress other errors (Trac #15767)
+
 Bottom line: insolubleWC (called in TcSimplify.setImplicationStatus)
              should ignore givens even if they are insoluble.
 
@@ -2452,9 +2563,18 @@ data Implication
       ic_no_eqs :: Bool,         -- True  <=> ic_givens have no equalities, for sure
                                  -- False <=> ic_givens might have equalities
 
-      ic_env   :: TcLclEnv,      -- Gives the source location and error context
-                                 -- for the implication, and hence for all the
-                                 -- given evidence variables
+      ic_env   :: Env TcGblEnv TcLclEnv,
+                                 -- Records the Env at the time of creation.
+                                 --
+                                 -- This is primarly needed for the enclosed
+                                 -- TcLclEnv, which gives the source location
+                                 -- and error context for the implication, and
+                                 -- hence for all the given evidence variables.
+                                 --
+                                 -- The enclosed DynFlags also influences error
+                                 -- reporting. See Note [Avoid
+                                 -- -Winaccessible-code when deriving] in
+                                 -- TcInstDcls.
 
       ic_wanted :: WantedConstraints,  -- The wanteds
                                        -- See Invariang (WantedInf) in TcType
@@ -2474,23 +2594,44 @@ data Implication
       ic_status   :: ImplicStatus
     }
 
-newImplication :: Implication
+-- | Create a new 'Implication' with as many sensible defaults for its fields
+-- as possible. Note that the 'ic_tclvl', 'ic_binds', and 'ic_info' fields do
+-- /not/ have sensible defaults, so they are initialized with lazy thunks that
+-- will 'panic' if forced, so one should take care to initialize these fields
+-- after creation.
+--
+-- This is monadic purely to look up the 'Env', which is used to initialize
+-- 'ic_env'.
+newImplication :: TcM Implication
 newImplication
-  = Implic { -- These fields must be initialisad
-             ic_tclvl = panic "newImplic:tclvl"
-           , ic_binds = panic "newImplic:binds"
-           , ic_info  = panic "newImplic:info"
-           , ic_env   = panic "newImplic:env"
+  = do env <- getEnv
+       return (implicationPrototype { ic_env = env })
 
-             -- The rest have sensible default values
-           , ic_skols      = []
-           , ic_telescope  = Nothing
-           , ic_given      = []
-           , ic_wanted     = emptyWC
-           , ic_no_eqs     = False
-           , ic_status     = IC_Unsolved
-           , ic_need_inner = emptyVarSet
-           , ic_need_outer = emptyVarSet }
+implicationPrototype :: Implication
+implicationPrototype
+   = Implic { -- These fields must be initialised
+              ic_tclvl      = panic "newImplic:tclvl"
+            , ic_binds      = panic "newImplic:binds"
+            , ic_info       = panic "newImplic:info"
+            , ic_env        = panic "newImplic:env"
+
+              -- The rest have sensible default values
+            , ic_skols      = []
+            , ic_telescope  = Nothing
+            , ic_given      = []
+            , ic_wanted     = emptyWC
+            , ic_no_eqs     = False
+            , ic_status     = IC_Unsolved
+            , ic_need_inner = emptyVarSet
+            , ic_need_outer = emptyVarSet }
+
+-- | Retrieve the enclosed 'TcLclEnv' from an 'Implication'.
+implicLclEnv :: Implication -> TcLclEnv
+implicLclEnv = env_lcl . ic_env
+
+-- | Retrieve the enclosed 'DynFlags' from an 'Implication'.
+implicDynFlags :: Implication -> DynFlags
+implicDynFlags = hsc_dflags . env_top . ic_env
 
 data ImplicStatus
   = IC_Solved     -- All wanteds in the tree are solved, all the way down
@@ -2508,8 +2649,9 @@ instance Outputable Implication where
   ppr (Implic { ic_tclvl = tclvl, ic_skols = skols
               , ic_given = given, ic_no_eqs = no_eqs
               , ic_wanted = wanted, ic_status = status
-              , ic_binds = binds, ic_need_inner = need_in
-              , ic_need_outer = need_out, ic_info = info })
+              , ic_binds = binds
+              , ic_need_inner = need_in, ic_need_outer = need_out
+              , ic_info = info })
    = hang (text "Implic" <+> lbrace)
         2 (sep [ text "TcLevel =" <+> ppr tclvl
                , text "Skolems =" <+> pprTyVars skols
@@ -2518,8 +2660,8 @@ instance Outputable Implication where
                , hang (text "Given =")  2 (pprEvVars given)
                , hang (text "Wanted =") 2 (ppr wanted)
                , text "Binds =" <+> ppr binds
-               , text "Needed inner =" <+> ppr need_in
-               , text "Needed outer =" <+> ppr need_out
+               , whenPprDebug (text "Needed inner =" <+> ppr need_in)
+               , whenPprDebug (text "Needed outer =" <+> ppr need_out)
                , pprSkolInfo info ] <+> rbrace)
 
 instance Outputable ImplicStatus where
@@ -2717,11 +2859,15 @@ ctEvEqRel = predTypeEqRel . ctEvPred
 ctEvRole :: CtEvidence -> Role
 ctEvRole = eqRelRole . ctEvEqRel
 
+ctEvTerm :: CtEvidence -> EvTerm
+ctEvTerm ev = EvExpr (ctEvExpr ev)
+
 ctEvExpr :: CtEvidence -> EvExpr
-ctEvExpr ev@(CtWanted { ctev_dest = HoleDest _ }) = evCoercion $ ctEvCoercion ev
+ctEvExpr ev@(CtWanted { ctev_dest = HoleDest _ })
+            = Coercion $ ctEvCoercion ev
 ctEvExpr ev = evId (ctEvEvId ev)
 
-ctEvCoercion :: CtEvidence -> Coercion
+ctEvCoercion :: HasDebugCallStack => CtEvidence -> Coercion
 ctEvCoercion (CtGiven { ctev_evar = ev_id })
   = mkTcCoVarCo ev_id
 ctEvCoercion (CtWanted { ctev_dest = dest })
@@ -2849,9 +2995,11 @@ ctFlavourRole (CTyEqCan { cc_ev = ev, cc_eq_rel = eq_rel })
 ctFlavourRole (CFunEqCan { cc_ev = ev })
   = (ctEvFlavour ev, NomEq)
 ctFlavourRole (CHoleCan { cc_ev = ev })
-  = (ctEvFlavour ev, NomEq)
+  = (ctEvFlavour ev, NomEq)  -- NomEq: CHoleCans can be rewritten by
+                             -- by nominal equalities but empahatically
+                             -- not by representational equalities
 ctFlavourRole ct
-  = ctEvFlavourRole (cc_ev ct)
+  = ctEvFlavourRole (ctEvidence ct)
 
 {- Note [eqCanRewrite]
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -3219,18 +3367,13 @@ data SkolemInfo
 
   | ReifySkol           -- Bound during Template Haskell reification
 
+  | QuantCtxtSkol       -- Quantified context, e.g.
+                        --   f :: forall c. (forall a. c a => c [a]) => blah
+
   | UnkSkol             -- Unhelpful info (until I improve it)
 
 instance Outputable SkolemInfo where
   ppr = pprSkolInfo
-
-termEvidenceAllowed :: SkolemInfo -> Bool
--- Whether an implication constraint with this SkolemInfo
--- is permitted to have term-level evidence.  There is
--- only one that is not, associated with unifiying
--- forall-types
-termEvidenceAllowed (UnifyForAllSkol {}) = False
-termEvidenceAllowed _                    = True
 
 pprSkolInfo :: SkolemInfo -> SDoc
 -- Complete the sentence "is a rigid type variable bound by..."
@@ -3255,6 +3398,8 @@ pprSkolInfo (UnifyForAllSkol ty) = text "the type" <+> ppr ty
 pprSkolInfo (TyConSkol flav name) = text "the" <+> ppr flav <+> text "declaration for" <+> quotes (ppr name)
 pprSkolInfo (DataConSkol name)= text "the data constructor" <+> quotes (ppr name)
 pprSkolInfo ReifySkol         = text "the type being reified"
+
+pprSkolInfo (QuantCtxtSkol {}) = text "a quantified context"
 
 -- UnkSkol
 -- For type variables the others are dealt with by pprSkolTvBinding.
@@ -3361,7 +3506,6 @@ data CtOrigin
   | NegateOrigin                        -- Occurrence of syntactic negation
 
   | ArithSeqOrigin (ArithSeqInfo GhcRn) -- [x..], [x..y] etc
-  | PArrSeqOrigin  (ArithSeqInfo GhcRn) -- [:x..y:] and [:x,y..z:]
   | SectionOrigin
   | TupleOrigin                        -- (..,..)
   | ExprSigOrigin       -- e :: ty
@@ -3486,7 +3630,7 @@ exprCtOrigin (HsLit {})           = Shouldn'tHappenOrigin "concrete literal"
 exprCtOrigin (HsLam _ matches)    = matchesCtOrigin matches
 exprCtOrigin (HsLamCase _ ms)     = matchesCtOrigin ms
 exprCtOrigin (HsApp _ e1 _)       = lexprCtOrigin e1
-exprCtOrigin (HsAppType _ e1)     = lexprCtOrigin e1
+exprCtOrigin (HsAppType _ e1 _)   = lexprCtOrigin e1
 exprCtOrigin (OpApp _ _ op _)     = lexprCtOrigin op
 exprCtOrigin (NegApp _ e _)       = lexprCtOrigin e
 exprCtOrigin (HsPar _ e)          = lexprCtOrigin e
@@ -3501,12 +3645,10 @@ exprCtOrigin (HsMultiIf _ rhs)   = lGRHSCtOrigin rhs
 exprCtOrigin (HsLet _ _ e)       = lexprCtOrigin e
 exprCtOrigin (HsDo {})           = DoOrigin
 exprCtOrigin (ExplicitList {})   = Shouldn'tHappenOrigin "list"
-exprCtOrigin (ExplicitPArr {})   = Shouldn'tHappenOrigin "parallel array"
 exprCtOrigin (RecordCon {})      = Shouldn'tHappenOrigin "record construction"
 exprCtOrigin (RecordUpd {})      = Shouldn'tHappenOrigin "record update"
 exprCtOrigin (ExprWithTySig {})  = ExprSigOrigin
 exprCtOrigin (ArithSeq {})       = Shouldn'tHappenOrigin "arithmetic sequence"
-exprCtOrigin (PArrSeq {})      = Shouldn'tHappenOrigin "parallel array sequence"
 exprCtOrigin (HsSCC _ _ _ e)     = lexprCtOrigin e
 exprCtOrigin (HsCoreAnn _ _ _ e) = lexprCtOrigin e
 exprCtOrigin (HsBracket {})      = Shouldn'tHappenOrigin "TH bracket"
@@ -3653,7 +3795,6 @@ pprCtO ViewPatOrigin         = text "a view pattern"
 pprCtO IfOrigin              = text "an if expression"
 pprCtO (LiteralOrigin lit)   = hsep [text "the literal", quotes (ppr lit)]
 pprCtO (ArithSeqOrigin seq)  = hsep [text "the arithmetic sequence", quotes (ppr seq)]
-pprCtO (PArrSeqOrigin seq)   = hsep [text "the parallel array sequence", quotes (ppr seq)]
 pprCtO SectionOrigin         = text "an operator section"
 pprCtO TupleOrigin           = text "a tuple"
 pprCtO NegateOrigin          = text "a use of syntactic negation"

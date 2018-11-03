@@ -32,10 +32,11 @@ import PprCore  ( pprCoreBindings, pprRules )
 import OccurAnal( occurAnalyseExpr, occurAnalysePgm )
 import Literal  ( Literal(MachStr) )
 import Id
-import Var      ( varType )
+import Var      ( varType, isNonCoVarId )
 import VarSet
 import VarEnv
 import DataCon
+import Demand( etaExpandStrictSig )
 import OptCoercion ( optCoercion )
 import Type     hiding ( substTy, extendTvSubst, extendCvSubst, extendTvSubstList
                        , isInScope, substTyVarBndr, cloneTyVarBndr )
@@ -86,7 +87,7 @@ little dance in action; the full Simplifier is a lot more complicated.
 
 -}
 
-simpleOptExpr :: CoreExpr -> CoreExpr
+simpleOptExpr :: DynFlags -> CoreExpr -> CoreExpr
 -- See Note [The simple optimiser]
 -- Do simple optimisation on an expression
 -- The optimisation is very straightforward: just
@@ -103,9 +104,9 @@ simpleOptExpr :: CoreExpr -> CoreExpr
 -- in  (let x = y in ....) we substitute for x; so y's occ-info
 -- may change radically
 
-simpleOptExpr expr
+simpleOptExpr dflags expr
   = -- pprTrace "simpleOptExpr" (ppr init_subst $$ ppr expr)
-    simpleOptExprWith init_subst expr
+    simpleOptExprWith dflags init_subst expr
   where
     init_subst = mkEmptySubst (mkInScopeSet (exprFreeVars expr))
         -- It's potentially important to make a proper in-scope set
@@ -118,34 +119,35 @@ simpleOptExpr expr
         -- It's a bit painful to call exprFreeVars, because it makes
         -- three passes instead of two (occ-anal, and go)
 
-simpleOptExprWith :: Subst -> InExpr -> OutExpr
+simpleOptExprWith :: DynFlags -> Subst -> InExpr -> OutExpr
 -- See Note [The simple optimiser]
-simpleOptExprWith subst expr
+simpleOptExprWith dflags subst expr
   = simple_opt_expr init_env (occurAnalyseExpr expr)
   where
-    init_env = SOE { soe_inl = emptyVarEnv, soe_subst = subst }
+    init_env = SOE { soe_dflags = dflags
+                   , soe_inl = emptyVarEnv
+                   , soe_subst = subst }
 
 ----------------------
 simpleOptPgm :: DynFlags -> Module
-             -> CoreProgram -> [CoreRule] -> [CoreVect]
-             -> IO (CoreProgram, [CoreRule], [CoreVect])
+             -> CoreProgram -> [CoreRule]
+             -> IO (CoreProgram, [CoreRule])
 -- See Note [The simple optimiser]
-simpleOptPgm dflags this_mod binds rules vects
+simpleOptPgm dflags this_mod binds rules
   = do { dumpIfSet_dyn dflags Opt_D_dump_occur_anal "Occurrence analysis"
                        (pprCoreBindings occ_anald_binds $$ pprRules rules );
 
-       ; return (reverse binds', rules', vects') }
+       ; return (reverse binds', rules') }
   where
     occ_anald_binds  = occurAnalysePgm this_mod
                           (\_ -> True)  {- All unfoldings active -}
                           (\_ -> False) {- No rules active -}
-                          rules vects emptyVarSet binds
+                          rules binds
 
-    (final_env, binds') = foldl do_one (emptyEnv, []) occ_anald_binds
+    (final_env, binds') = foldl' do_one (emptyEnv dflags, []) occ_anald_binds
     final_subst = soe_subst final_env
 
     rules' = substRulesForImportedIds final_subst rules
-    vects' = substVects final_subst vects
              -- We never unconditionally inline into rules,
              -- hence paying just a substitution
 
@@ -160,7 +162,8 @@ simpleOptPgm dflags this_mod binds rules vects
 type SimpleClo = (SimpleOptEnv, InExpr)
 
 data SimpleOptEnv
-  = SOE { soe_inl   :: IdEnv SimpleClo
+  = SOE { soe_dflags :: DynFlags
+        , soe_inl   :: IdEnv SimpleClo
              -- Deals with preInlineUnconditionally; things
              -- that occur exactly once and are inlined
              -- without having first been simplified
@@ -175,13 +178,15 @@ instance Outputable SimpleOptEnv where
                             , text "soe_subst =" <+> ppr subst ]
                    <+> text "}"
 
-emptyEnv :: SimpleOptEnv
-emptyEnv = SOE { soe_inl = emptyVarEnv
-               , soe_subst = emptySubst }
+emptyEnv :: DynFlags -> SimpleOptEnv
+emptyEnv dflags
+  = SOE { soe_dflags = dflags
+        , soe_inl = emptyVarEnv
+        , soe_subst = emptySubst }
 
 soeZapSubst :: SimpleOptEnv -> SimpleOptEnv
-soeZapSubst (SOE { soe_subst = subst })
-  = SOE { soe_inl = emptyVarEnv, soe_subst = zapSubstEnv subst }
+soeZapSubst env@(SOE { soe_subst = subst })
+  = env { soe_inl = emptyVarEnv, soe_subst = zapSubstEnv subst }
 
 soeSetInScope :: SimpleOptEnv -> SimpleOptEnv -> SimpleOptEnv
 -- Take in-scope set from env1, and the rest from env2
@@ -210,13 +215,13 @@ simple_opt_expr env expr
 
     go (App e1 e2)      = simple_app env e1 [(env,e2)]
     go (Type ty)        = Type     (substTy subst ty)
-    go (Coercion co)    = Coercion (optCoercion (getTCvSubst subst) co)
+    go (Coercion co)    = Coercion (optCoercion (soe_dflags env) (getTCvSubst subst) co)
     go (Lit lit)        = Lit lit
     go (Tick tickish e) = mkTick (substTickish subst tickish) (go e)
     go (Cast e co)      | isReflCo co' = go e
                         | otherwise    = Cast (go e) co'
                         where
-                          co' = optCoercion (getTCvSubst subst) co
+                          co' = optCoercion (soe_dflags env) (getTCvSubst subst) co
 
     go (Let bind body) = case simple_opt_bind env bind of
                            (env', Nothing)   -> simple_opt_expr env' body
@@ -238,7 +243,7 @@ simple_opt_expr env expr
          -- Note [Getting the map/coerce RULE to work]
       | isDeadBinder b
       , [(DEFAULT, _, rhs)] <- as
-      , isCoercionType (varType b)
+      , isCoVarType (varType b)
       , (Var fun, _args) <- collectArgs e
       , fun `hasKey` coercibleSCSelIdKey
          -- without this last check, we get #11230
@@ -327,7 +332,7 @@ simple_opt_bind env (Rec prs)
     res_bind          = Just (Rec (reverse rev_prs'))
     prs'              = joinPointBindings_maybe prs `orElse` prs
     (env', bndrs')    = subst_opt_bndrs env (map fst prs')
-    (env'', rev_prs') = foldl do_pr (env', []) (prs' `zip` bndrs')
+    (env'', rev_prs') = foldl' do_pr (env', []) (prs' `zip` bndrs')
     do_pr (env, prs) ((b,r), b')
        = (env', case mb_pr of
                   Just pr -> pr : prs
@@ -351,11 +356,14 @@ simple_bind_pair env@(SOE { soe_inl = inl_env, soe_subst = subst })
     (env { soe_subst = extendTvSubst subst in_bndr out_ty }, Nothing)
 
   | Coercion co <- in_rhs
-  , let out_co = optCoercion (getTCvSubst (soe_subst rhs_env)) co
+  , let out_co = optCoercion (soe_dflags env) (getTCvSubst (soe_subst rhs_env)) co
   = ASSERT( isCoVar in_bndr )
     (env { soe_subst = extendCvSubst subst in_bndr out_co }, Nothing)
 
-  | pre_inline_unconditionally
+  | ASSERT2( isNonCoVarId in_bndr, ppr in_bndr )
+    -- The previous two guards got rid of tyvars and coercions
+    -- See Note [CoreSyn type and coercion invariant] in CoreSyn
+    pre_inline_unconditionally
   = (env { soe_inl = extendVarEnv inl_env in_bndr clo }, Nothing)
 
   | otherwise
@@ -380,12 +388,11 @@ simple_bind_pair env@(SOE { soe_inl = inl_env, soe_subst = subst })
 
     pre_inline_unconditionally :: Bool
     pre_inline_unconditionally
-       | isCoVar in_bndr          = False    -- See Note [Do not inline CoVars unconditionally]
-       | isExportedId in_bndr     = False    --     in SimplUtils
+       | isExportedId in_bndr     = False
        | stable_unf               = False
        | not active               = False    -- Note [Inline prag in simplOpt]
        | not (safe_to_inline occ) = False
-       | otherwise = True
+       | otherwise                = True
 
         -- Unconditionally safe to inline
     safe_to_inline :: OccInfo -> Bool
@@ -418,7 +425,10 @@ simple_out_bind_pair :: SimpleOptEnv
                      -> (SimpleOptEnv, Maybe (OutVar, OutExpr))
 simple_out_bind_pair env in_bndr mb_out_bndr out_rhs
                      occ_info active stable_unf
-  | post_inline_unconditionally
+  | ASSERT2( isNonCoVarId in_bndr, ppr in_bndr )
+    -- Type and coercion bindings are caught earlier
+    -- See Note [CoreSyn type and coercion invariant]
+    post_inline_unconditionally
   = ( env' { soe_subst = extendIdSubst (soe_subst env) in_bndr out_rhs }
     , Nothing)
 
@@ -432,14 +442,16 @@ simple_out_bind_pair env in_bndr mb_out_bndr out_rhs
 
     post_inline_unconditionally :: Bool
     post_inline_unconditionally
-       | not active                  = False
-       | isWeakLoopBreaker occ_info  = False -- If it's a loop-breaker of any kind, don't inline
-                                             -- because it might be referred to "earlier"
-       | stable_unf                  = False -- Note [Stable unfoldings and postInlineUnconditionally]
-       | isExportedId in_bndr        = False -- Note [Exported Ids and trivial RHSs]
-       | exprIsTrivial out_rhs       = True
-       | coercible_hack              = True
-       | otherwise                   = False
+       | isExportedId in_bndr  = False -- Note [Exported Ids and trivial RHSs]
+       | stable_unf            = False -- Note [Stable unfoldings and postInlineUnconditionally]
+       | not active            = False --     in SimplUtils
+       | is_loop_breaker       = False -- If it's a loop-breaker of any kind, don't inline
+                                       -- because it might be referred to "earlier"
+       | exprIsTrivial out_rhs = True
+       | coercible_hack        = True
+       | otherwise             = False
+
+    is_loop_breaker = isWeakLoopBreaker occ_info
 
     -- See Note [Getting the map/coerce RULE to work]
     coercible_hack | (Var fun, args) <- collectArgs out_rhs
@@ -494,8 +506,8 @@ subst_opt_id_bndr :: SimpleOptEnv -> InId -> (SimpleOptEnv, OutId)
 -- It's important to zap fragile OccInfo (which CoreSubst.substIdBndr
 -- carefully does not do) because simplOptExpr invalidates it
 
-subst_opt_id_bndr (SOE { soe_subst = subst, soe_inl = inl }) old_id
-  = (SOE { soe_subst = new_subst, soe_inl = new_inl }, new_id)
+subst_opt_id_bndr env@(SOE { soe_subst = subst, soe_inl = inl }) old_id
+  = (env { soe_subst = new_subst, soe_inl = new_inl }, new_id)
   where
     Subst in_scope id_subst tv_subst cv_subst = subst
 
@@ -535,18 +547,6 @@ simpleUnfoldingFun id
 wrapLet :: Maybe (Id,CoreExpr) -> CoreExpr -> CoreExpr
 wrapLet Nothing      body = body
 wrapLet (Just (b,r)) body = Let (NonRec b r) body
-
-------------------
-substVects :: Subst -> [CoreVect] -> [CoreVect]
-substVects subst = map (substVect subst)
-
-------------------
-substVect :: Subst -> CoreVect -> CoreVect
-substVect subst  (Vect v rhs)        = Vect v (simpleOptExprWith subst rhs)
-substVect _subst vd@(NoVect _)       = vd
-substVect _subst vd@(VectType _ _ _) = vd
-substVect _subst vd@(VectClass _)    = vd
-substVect _subst vd@(VectInst _)     = vd
 
 {-
 Note [Inline prag in simplOpt]
@@ -666,7 +666,11 @@ joinPointBinding_maybe bndr rhs
 
   | AlwaysTailCalled join_arity <- tailCallInfo (idOccInfo bndr)
   , (bndrs, body) <- etaExpandToJoinPoint join_arity rhs
-  = Just (bndr `asJoinId` join_arity, mkLams bndrs body)
+  , let str_sig   = idStrictness bndr
+        str_arity = count isId bndrs  -- Strictness demands are for Ids only
+        join_bndr = bndr `asJoinId`        join_arity
+                         `setIdStrictness` etaExpandStrictSig str_arity str_sig
+  = Just (join_bndr, mkLams bndrs body)
 
   | otherwise
   = Nothing
@@ -675,6 +679,27 @@ joinPointBindings_maybe :: [(InBndr, InExpr)] -> Maybe [(InBndr, InExpr)]
 joinPointBindings_maybe bndrs
   = mapM (uncurry joinPointBinding_maybe) bndrs
 
+
+{- Note [Strictness and join points]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose we have
+
+   let f = \x.  if x>200 then e1 else e1
+
+and we know that f is strict in x.  Then if we subsequently
+discover that f is an arity-2 join point, we'll eta-expand it to
+
+   let f = \x y.  if x>200 then e1 else e1
+
+and now it's only strict if applied to two arguments.  So we should
+adjust the strictness info.
+
+A more common case is when
+
+   f = \x. error ".."
+
+and again its arity increses (Trac #15517)
+-}
 
 {- *********************************************************************
 *                                                                      *
@@ -754,8 +779,8 @@ exprIsConApp_maybe (in_scope, id_unf) expr
        | Just (args', m_co1') <- pushCoArgs (subst_co subst co1) args
             -- See Note [Push coercions in exprIsConApp_maybe]
        = case m_co1' of
-           Just co1' -> go subst expr (CC args' (co1' `mkTransCo` co2))
-           Nothing   -> go subst expr (CC args' co2)
+           MCo co1' -> go subst expr (CC args' (co1' `mkTransCo` co2))
+           MRefl    -> go subst expr (CC args' co2)
     go subst (App fun arg) (CC args co)
        = go subst fun (CC (subst_arg subst arg : args) co)
     go subst (Lam var body) (CC (arg:args) co)
@@ -915,7 +940,7 @@ exprIsLambda_maybe (in_scope_set, id_unf) e
     -- Make sure there is hope to get a lambda
     , Just rhs <- expandUnfolding_maybe (id_unf f)
     -- Optimize, for beta-reduction
-    , let e' =  simpleOptExprWith (mkEmptySubst in_scope_set) (rhs `mkApps` as)
+    , let e' = simpleOptExprWith unsafeGlobalDynFlags (mkEmptySubst in_scope_set) (rhs `mkApps` as)
     -- Recurse, because of possible casts
     , Just (x', e'', ts') <- exprIsLambda_maybe (in_scope_set, id_unf) e'
     , let res = Just (x', e'', ts++ts')
@@ -949,15 +974,15 @@ Here we implement the "push rules" from FC papers:
   by pushing the coercion into the arguments
 -}
 
-pushCoArgs :: CoercionR -> [CoreArg] -> Maybe ([CoreArg], Maybe Coercion)
-pushCoArgs co []         = return ([], Just co)
+pushCoArgs :: CoercionR -> [CoreArg] -> Maybe ([CoreArg], MCoercion)
+pushCoArgs co []         = return ([], MCo co)
 pushCoArgs co (arg:args) = do { (arg',  m_co1) <- pushCoArg  co  arg
                               ; case m_co1 of
-                                  Just co1 -> do { (args', m_co2) <- pushCoArgs co1 args
+                                  MCo co1 -> do { (args', m_co2) <- pushCoArgs co1 args
                                                  ; return (arg':args', m_co2) }
-                                  Nothing  -> return (arg':args, Nothing) }
+                                  MRefl  -> return (arg':args, MRefl) }
 
-pushCoArg :: CoercionR -> CoreArg -> Maybe (CoreArg, Maybe Coercion)
+pushCoArg :: CoercionR -> CoreArg -> Maybe (CoreArg, MCoercion)
 -- We have (fun |> co) arg, and we want to transform it to
 --         (fun arg) |> co
 -- This may fail, e.g. if (fun :: N) where N is a newtype
@@ -969,7 +994,7 @@ pushCoArg co (Type ty) = do { (ty', m_co') <- pushCoTyArg co ty
 pushCoArg co val_arg   = do { (arg_co, m_co') <- pushCoValArg co
                             ; return (val_arg `mkCast` arg_co, m_co') }
 
-pushCoTyArg :: CoercionR -> Type -> Maybe (Type, Maybe CoercionR)
+pushCoTyArg :: CoercionR -> Type -> Maybe (Type, MCoercionR)
 -- We have (fun |> co) @ty
 -- Push the coercion through to return
 --         (fun @ty') |> co'
@@ -982,9 +1007,12 @@ pushCoTyArg co ty
   -- -- | tyL `eqType` tyR
   -- -- = Just (ty, Nothing)
 
-  | isForAllTy tyL
-  = ASSERT2( isForAllTy tyR, ppr co $$ ppr ty )
-    Just (ty `mkCastTy` mkSymCo co1, Just co2)
+  | isReflCo co
+  = Just (ty, MRefl)
+
+  | isForAllTy_ty tyL
+  = ASSERT2( isForAllTy_ty tyR, ppr co $$ ppr ty )
+    Just (ty `mkCastTy` co1, MCo co2)
 
   | otherwise
   = Nothing
@@ -994,17 +1022,17 @@ pushCoTyArg co ty
        -- tyL = forall (a1 :: k1). ty1
        -- tyR = forall (a2 :: k2). ty2
 
-    co1 = mkNthCo Nominal 0 co
-       -- co1 :: k1 ~N k2
+    co1 = mkSymCo (mkNthCo Nominal 0 co)
+       -- co1 :: k2 ~N k1
        -- Note that NthCo can extract a Nominal equality between the
        -- kinds of the types related by a coercion between forall-types.
        -- See the NthCo case in CoreLint.
 
-    co2 = mkInstCo co (mkCoherenceLeftCo (mkNomReflCo ty) co1)
+    co2 = mkInstCo co (mkGReflLeftCo Nominal ty co1)
         -- co2 :: ty1[ (ty|>co1)/a1 ] ~ ty2[ ty/a2 ]
         -- Arg of mkInstCo is always nominal, hence mkNomReflCo
 
-pushCoValArg :: CoercionR -> Maybe (Coercion, Maybe Coercion)
+pushCoValArg :: CoercionR -> Maybe (Coercion, MCoercion)
 -- We have (fun |> co) arg
 -- Push the coercion through to return
 --         (fun (arg |> co_arg)) |> co_res
@@ -1017,13 +1045,16 @@ pushCoValArg co
   -- -- | tyL `eqType` tyR
   -- -- = Just (mkRepReflCo arg, Nothing)
 
+  | isReflCo co
+  = Just (mkRepReflCo arg, MRefl)
+
   | isFunTy tyL
   , (co1, co2) <- decomposeFunCo Representational co
               -- If   co  :: (tyL1 -> tyL2) ~ (tyR1 -> tyR2)
               -- then co1 :: tyL1 ~ tyR1
               --      co2 :: tyL2 ~ tyR2
   = ASSERT2( isFunTy tyR, ppr co $$ ppr arg )
-    Just (mkSymCo co1, Just co2)
+    Just (mkSymCo co1, MCo co2)
 
   | otherwise
   = Nothing
@@ -1081,11 +1112,11 @@ pushCoDataCon dc dc_args co
   = let
         tc_arity       = tyConArity to_tc
         dc_univ_tyvars = dataConUnivTyVars dc
-        dc_ex_tyvars   = dataConExTyVars dc
+        dc_ex_tcvars   = dataConExTyCoVars dc
         arg_tys        = dataConRepArgTys dc
 
         non_univ_args  = dropList dc_univ_tyvars dc_args
-        (ex_args, val_args) = splitAtList dc_ex_tyvars non_univ_args
+        (ex_args, val_args) = splitAtList dc_ex_tcvars non_univ_args
 
         -- Make the "Psi" from the paper
         omegas = decomposeCo tc_arity co (tyConRolesRepresentational to_tc)
@@ -1093,7 +1124,7 @@ pushCoDataCon dc dc_args co
           = liftCoSubstWithEx Representational
                               dc_univ_tyvars
                               omegas
-                              dc_ex_tyvars
+                              dc_ex_tcvars
                               (map exprToType ex_args)
 
           -- Cast the value arguments (which include dictionaries)
@@ -1102,7 +1133,7 @@ pushCoDataCon dc dc_args co
 
         to_ex_args = map Type to_ex_arg_tys
 
-        dump_doc = vcat [ppr dc,      ppr dc_univ_tyvars, ppr dc_ex_tyvars,
+        dump_doc = vcat [ppr dc,      ppr dc_univ_tyvars, ppr dc_ex_tcvars,
                          ppr arg_tys, ppr dc_args,
                          ppr ex_args, ppr val_args, ppr co, ppr from_ty, ppr to_ty, ppr to_tc ]
     in
@@ -1148,10 +1179,18 @@ collectBindersPushingCo e
     go_lam bs b e co
       | isTyVar b
       , let Pair tyL tyR = coercionKind co
-      , ASSERT( isForAllTy tyL )
-        isForAllTy tyR
+      , ASSERT( isForAllTy_ty tyL )
+        isForAllTy_ty tyR
       , isReflCo (mkNthCo Nominal 0 co)  -- See Note [collectBindersPushingCo]
       = go_c (b:bs) e (mkInstCo co (mkNomReflCo (mkTyVarTy b)))
+
+      | isCoVar b
+      , let Pair tyL tyR = coercionKind co
+      , ASSERT( isForAllTy_co tyL )
+        isForAllTy_co tyR
+      , isReflCo (mkNthCo Nominal 0 co)  -- See Note [collectBindersPushingCo]
+      , let cov = mkCoVarCo b
+      = go_c (b:bs) e (mkInstCo co (mkNomReflCo (mkCoercionTy cov)))
 
       | isId b
       , let Pair tyL tyR = coercionKind co

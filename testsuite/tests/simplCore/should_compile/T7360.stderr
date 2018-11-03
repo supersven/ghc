@@ -26,7 +26,7 @@ fun1 [InlPrag=NOINLINE] :: Foo -> ()
  Str=<S,1*U>,
  Unf=Unf{Src=InlineStable, TopLvl=True, Value=True, ConLike=True,
          WorkFree=True, Expandable=True,
-         Guidance=ALWAYS_IF(arity=1,unsat_ok=True,boring_ok=False)
+         Guidance=ALWAYS_IF(arity=1,unsat_ok=True,boring_ok=True)
          Tmpl= \ (x [Occ=Once] :: Foo) ->
                  case x of { __DEFAULT -> GHC.Tuple.() }}]
 fun1 = \ (x :: Foo) -> case x of { __DEFAULT -> GHC.Tuple.() }
@@ -57,10 +57,10 @@ fun2 :: forall a. [a] -> ((), Int)
          Guidance=ALWAYS_IF(arity=1,unsat_ok=True,boring_ok=False)
          Tmpl= \ (@ a) (x [Occ=Once!] :: [a]) ->
                  (T7360.fun5,
-                  case x of wild {
+                  case x of wild [Occ=Once] {
                     [] -> T7360.fun4;
                     : _ [Occ=Dead] _ [Occ=Dead] ->
-                      case GHC.List.$wlenAcc @ a wild 0# of ww2 { __DEFAULT ->
+                      case GHC.List.$wlenAcc @ a wild 0# of ww2 [Occ=Once] { __DEFAULT ->
                       GHC.Types.I# ww2
                       }
                   })}]

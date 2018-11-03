@@ -84,7 +84,8 @@ Other Prelude modules are much easier with fewer complex dependencies.
            , ExistentialQuantification
            , RankNTypes
            , KindSignatures
-           , TypeInType
+           , PolyKinds
+           , DataKinds
   #-}
 -- -Wno-orphans is needed for things like:
 -- Orphan rule: "x# -# x#" ALWAYS forall x# :: Int# -# x# x# = 0
@@ -116,7 +117,8 @@ module GHC.Base
         module GHC.Types,
         module GHC.Prim,        -- Re-export GHC.Prim and [boot] GHC.Err,
                                 -- to avoid lots of people having to
-        module GHC.Err          -- import it explicitly
+        module GHC.Err,         -- import it explicitly
+        module GHC.Maybe
   )
         where
 
@@ -126,10 +128,12 @@ import GHC.CString
 import GHC.Magic
 import GHC.Prim
 import GHC.Err
+import GHC.Maybe
 import {-# SOURCE #-} GHC.IO (failIO,mplusIO)
 
-import GHC.Tuple ()     -- Note [Depend on GHC.Tuple]
-import GHC.Integer ()   -- Note [Depend on GHC.Integer]
+import GHC.Tuple ()              -- Note [Depend on GHC.Tuple]
+import GHC.Integer ()            -- Note [Depend on GHC.Integer]
+import GHC.Natural ()            -- Note [Depend on GHC.Natural]
 
 -- for 'class Semigroup'
 import {-# SOURCE #-} GHC.Real (Integral)
@@ -181,6 +185,10 @@ Similarly, tuple syntax (or ()) creates an implicit dependency on
 GHC.Tuple, so we use the same rule as for Integer --- see Note [Depend on
 GHC.Integer] --- to explain this to the build system.  We make GHC.Base
 depend on GHC.Tuple, and everything else depends on GHC.Base or Prelude.
+
+Note [Depend on GHC.Natural]
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Similar to GHC.Integer.
 -}
 
 #if 0
@@ -201,21 +209,6 @@ build = errorWithoutStackTrace "urk"
 foldr = errorWithoutStackTrace "urk"
 #endif
 
--- | The 'Maybe' type encapsulates an optional value.  A value of type
--- @'Maybe' a@ either contains a value of type @a@ (represented as @'Just' a@),
--- or it is empty (represented as 'Nothing').  Using 'Maybe' is a good way to
--- deal with errors or exceptional cases without resorting to drastic
--- measures such as 'error'.
---
--- The 'Maybe' type is also a monad.  It is a simple kind of error
--- monad, where all errors are represented by 'Nothing'.  A richer
--- error monad can be built using the 'Data.Either.Either' type.
---
-data  Maybe a  =  Nothing | Just a
-  deriving ( Eq  -- ^ @since 2.01
-           , Ord -- ^ @since 2.01
-           )
-
 infixr 6 <>
 
 -- | The class of semigroups (types with an associative binary operation).
@@ -229,7 +222,7 @@ class Semigroup a where
         -- | An associative operation.
         (<>) :: a -> a -> a
 
-        -- | Reduce a non-empty list with @\<\>@
+        -- | Reduce a non-empty list with '<>'
         --
         -- The default definition should be sufficient, but this can be
         -- overridden for efficiency.
@@ -247,7 +240,7 @@ class Semigroup a where
         --
         -- By making this a member of the class, idempotent semigroups
         -- and monoids can upgrade this to execute in /O(1)/ by
-        -- picking @stimes = 'stimesIdempotent'@ or @stimes =
+        -- picking @stimes = 'Data.Semigroup.stimesIdempotent'@ or @stimes =
         -- 'stimesIdempotentMonoid'@ respectively.
         stimes :: Integral b => b -> a -> a
         stimes = stimesDefault
@@ -262,7 +255,7 @@ class Semigroup a where
 --
 --  * @x '<>' (y '<>' z) = (x '<>' y) '<>' z@ ('Semigroup' law)
 --
---  * @'mconcat' = 'foldr' '(<>)' 'mempty'@
+--  * @'mconcat' = 'foldr' ('<>') 'mempty'@
 --
 -- The method names refer to the monoid of lists under concatenation,
 -- but there are many other instances.
@@ -270,7 +263,7 @@ class Semigroup a where
 -- Some types can be viewed as a monoid in more than one way,
 -- e.g. both addition and multiplication on numbers.
 -- In such cases we often define @newtype@s and make those instances
--- of 'Monoid', e.g. 'Sum' and 'Product'.
+-- of 'Monoid', e.g. 'Data.Semigroup.Sum' and 'Data.Semigroup.Product'.
 --
 -- __NOTE__: 'Semigroup' is a superclass of 'Monoid' since /base-4.11.0.0/.
 class Semigroup a => Monoid a where
@@ -280,7 +273,7 @@ class Semigroup a => Monoid a where
         -- | An associative operation
         --
         -- __NOTE__: This method is redundant and has the default
-        -- implementation @'mappend' = '(<>)'@ since /base-4.11.0.0/.
+        -- implementation @'mappend' = ('<>')@ since /base-4.11.0.0/.
         mappend :: a -> a -> a
         mappend = (<>)
         {-# INLINE mappend #-}
@@ -451,14 +444,15 @@ instance Semigroup a => Semigroup (IO a) where
 instance Monoid a => Monoid (IO a) where
     mempty = pure mempty
 
-{- | The 'Functor' class is used for types that can be mapped over.
-Instances of 'Functor' should satisfy the following laws:
+{- | A type @f@ is a Functor if it provides a function @fmap@ which, given any types @a@ and @b@
+lets you apply any function from @(a -> b)@ to turn an @f a@ into an @f b@, preserving the
+structure of @f@. Furthermore @f@ needs to adhere to the following laws:
 
-> fmap id  ==  id
-> fmap (f . g)  ==  fmap f . fmap g
+[/identity/]
+  @'fmap' 'id' = 'id'@
 
-The instances of 'Functor' for lists, 'Data.Maybe.Maybe' and 'System.IO.IO'
-satisfy these laws.
+[/composition/]
+  @'fmap' (f . g) = 'fmap' f . 'fmap' g@
 -}
 
 class  Functor f  where
@@ -482,7 +476,7 @@ class  Functor f  where
 --
 --      @('<*>') = 'liftA2' 'id'@
 --
---      @'liftA2' f x y = f '<$>' x '<*>' y@
+--      @'liftA2' f x y = f 'Prelude.<$>' x '<*>' y@
 --
 -- Further, any definition must satisfy the following:
 --
@@ -678,8 +672,8 @@ class Applicative m => Monad m where
     -- failure in a @do@ expression.
     --
     -- As part of the MonadFail proposal (MFP), this function is moved
-    -- to its own class 'MonadFail' (see "Control.Monad.Fail" for more
-    -- details). The definition here will be removed in a future
+    -- to its own class 'Control.Monad.MonadFail' (see "Control.Monad.Fail" for
+    -- more details). The definition here will be removed in a future
     -- release.
     fail        :: String -> m a
     fail s      = errorWithoutStackTrace s
@@ -876,7 +870,7 @@ infixl 3 <|>
 -- If defined, 'some' and 'many' should be the least solutions
 -- of the equations:
 --
--- * @'some' v = (:) '<$>' v '<*>' 'many' v@
+-- * @'some' v = (:) 'Prelude.<$>' v '<*>' 'many' v@
 --
 -- * @'many' v = 'some' v '<|>' 'pure' []@
 class Applicative f => Alternative f where
@@ -1263,8 +1257,8 @@ id x                    =  x
 -- The compiler may rewrite it to @('assertError' line)@.
 
 -- | If the first argument evaluates to 'True', then the result is the
--- second argument.  Otherwise an 'AssertionFailed' exception is raised,
--- containing a 'String' with the source file and line number of the
+-- second argument.  Otherwise an 'Control.Exception.AssertionFailed' exception
+-- is raised, containing a 'String' with the source file and line number of the
 -- call to 'assert'.
 --
 -- Assertions can normally be turned on or off with a compiler flag
@@ -1395,21 +1389,12 @@ unIO :: IO a -> (State# RealWorld -> (# State# RealWorld, a #))
 unIO (IO a) = a
 
 {- |
-Returns the 'tag' of a constructor application; this function is used
+Returns the tag of a constructor application; this function is used
 by the deriving code for Eq, Ord and Enum.
-
-The primitive dataToTag# requires an evaluated constructor application
-as its argument, so we provide getTag as a wrapper that performs the
-evaluation before calling dataToTag#.  We could have dataToTag#
-evaluate its argument, but we prefer to do it this way because (a)
-dataToTag# can be an inline primop if it doesn't need to do any
-evaluation, and (b) we want to expose the evaluation to the
-simplifier, because it might be possible to eliminate the evaluation
-in the case when the argument is already known to be evaluated.
 -}
 {-# INLINE getTag #-}
 getTag :: a -> Int#
-getTag !x = dataToTag# x
+getTag x = dataToTag# x
 
 ----------------------------------------------
 -- Numeric primops

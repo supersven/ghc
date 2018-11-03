@@ -5,6 +5,7 @@
 
 {-# LANGUAGE CPP, DeriveDataTypeable, FlexibleContexts #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE BangPatterns #-}
 
 -- | CoreSyn holds all the main data types for use by for the Glasgow Haskell Compiler midsection
 module CoreSyn (
@@ -18,7 +19,7 @@ module CoreSyn (
         InId, InBind, InExpr, InAlt, InArg, InType, InKind,
                InBndr, InVar, InCoercion, InTyVar, InCoVar,
         OutId, OutBind, OutExpr, OutAlt, OutArg, OutType, OutKind,
-               OutBndr, OutVar, OutCoercion, OutTyVar, OutCoVar,
+               OutBndr, OutVar, OutCoercion, OutTyVar, OutCoVar, MOutCoercion,
 
         -- ** 'Expr' construction
         mkLet, mkLets, mkLetNonRec, mkLetRec, mkLams,
@@ -40,12 +41,12 @@ module CoreSyn (
         bindersOf, bindersOfBinds, rhssOfBind, rhssOfAlts,
         collectBinders, collectTyBinders, collectTyAndValBinders,
         collectNBinders,
-        collectArgs, collectArgsTicks, flattenBinds,
+        collectArgs, stripNArgs, collectArgsTicks, flattenBinds,
 
         exprToType, exprToCoercion_maybe,
         applyTypeToArg,
 
-        isValArg, isTypeArg, isTyCoArg, valArgCount, valBndrCount,
+        isValArg, isTypeArg, isCoArg, isTyCoArg, valArgCount, valBndrCount,
         isRuntimeArg, isRuntimeVar,
 
         -- * Tick-related functions
@@ -92,9 +93,6 @@ module CoreSyn (
         ruleArity, ruleName, ruleIdName, ruleActivation,
         setRuleIdName, ruleModule,
         isBuiltinRule, isLocalRule, isAutoRule,
-
-        -- * Core vectorisation declarations data type
-        CoreVect(..)
     ) where
 
 #include "HsVersions.h"
@@ -112,7 +110,6 @@ import NameEnv( NameEnv, emptyNameEnv )
 import Literal
 import DataCon
 import Module
-import TyCon
 import BasicTypes
 import DynFlags
 import Outputable
@@ -176,6 +173,7 @@ These data types are the heart of the compiler
 -- The language consists of the following elements:
 --
 -- *  Variables
+--    See Note [Variable occurrences in Core]
 --
 -- *  Primitive literals
 --
@@ -190,29 +188,10 @@ These data types are the heart of the compiler
 --    this corresponds to allocating a thunk for the things
 --    bound and then executing the sub-expression.
 --
---    #top_level_invariant#
---    #letrec_invariant#
---
---    The right hand sides of all top-level and recursive @let@s
---    /must/ be of lifted type (see "Type#type_classification" for
---    the meaning of /lifted/ vs. /unlifted/). There is one exception
---    to this rule, top-level @let@s are allowed to bind primitive
---    string literals, see Note [CoreSyn top-level string literals].
---
+--    See Note [CoreSyn letrec invariant]
 --    See Note [CoreSyn let/app invariant]
 --    See Note [Levity polymorphism invariants]
---
---    #type_let#
---    We allow a /non-recursive/ let to bind a type variable, thus:
---
---    > Let (NonRec tv (Type ty)) body
---
---    This can be very convenient for postponing type substitutions until
---    the next run of the simplifier.
---
---    At the moment, the rest of the compiler only deals with type-let
---    in a Let expression, rather than at top level.  We may want to revist
---    this choice.
+--    See Note [CoreSyn type and coercion invariant]
 --
 -- *  Case expression. Operationally this corresponds to evaluating
 --    the scrutinee (expression examined) to weak head normal form
@@ -374,13 +353,25 @@ PrelRules for the rationale for this restriction.
 
 -------------------------- CoreSyn INVARIANTS ---------------------------
 
-Note [CoreSyn top-level invariant]
+Note [Variable occurrences in Core]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-See #toplevel_invariant#
+Variable /occurrences/ are never CoVars, though /bindings/ can be.
+All CoVars appear in Coercions.
+
+For example
+  \(c :: Age~#Int) (d::Int). d |> (sym c)
+Here 'c' is a CoVar, which is lambda-bound, but it /occurs/ in
+a Coercion, (sym c).
 
 Note [CoreSyn letrec invariant]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-See #letrec_invariant#
+The right hand sides of all top-level and recursive @let@s
+/must/ be of lifted type (see "Type#type_classification" for
+the meaning of /lifted/ vs. /unlifted/).
+
+There is one exception to this rule, top-level @let@s are
+allowed to bind primitive string literals: see
+Note [CoreSyn top-level string literals].
 
 Note [CoreSyn top-level string literals]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -453,6 +444,27 @@ which will generate a @case@ if necessary
 
 The let/app invariant is initially enforced by mkCoreLet and mkCoreApp in
 coreSyn/MkCore.
+
+Note [CoreSyn type and coercion invariant]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We allow a /non-recursive/, /non-top-level/ let to bind type and
+coercion variables.  These can be very convenient for postponing type
+substitutions until the next run of the simplifier.
+
+* A type variable binding must have a RHS of (Type ty)
+
+* A coercion variable binding must have a RHS of (Coercion co)
+
+  It is possible to have terms that return a coercion, but we use
+  case-binding for those; e.g.
+     case (eq_sel d) of (co :: a ~# b) -> blah
+  where eq_sel :: (a~b) -> (a~#b)
+
+  Or even even
+      case (df @Int) of (co :: a ~# b) -> blah
+  Which is very exotic, and I think never encountered; but see
+  Note [Equality superclasses in quantified constraints]
+  in TcCanonical
 
 Note [CoreSyn case invariants]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -760,7 +772,7 @@ transformation universally. This transformation would do:
 but that is ill-typed, as `x` is type `a`, not `Bool`.
 
 
-This is also justifies why we do not consider the `e` in `e |> co` to be in
+This also justifies why we do not consider the `e` in `e |> co` to be in
 tail position: A cast changes the type, but the type must be the same. But
 operationally, casts are vacuous, so this is a bit unfortunate! See #14610 for
 ideas how to fix this.
@@ -793,6 +805,7 @@ type OutBind     = CoreBind
 type OutExpr     = CoreExpr
 type OutAlt      = CoreAlt
 type OutArg      = CoreArg
+type MOutCoercion = MCoercion
 
 
 {- *********************************************************************
@@ -1300,23 +1313,6 @@ isLocalRule = ru_local
 -- | Set the 'Name' of the 'Id.Id' at the head of the rule left hand side
 setRuleIdName :: Name -> CoreRule -> CoreRule
 setRuleIdName nm ru = ru { ru_fn = nm }
-
-{-
-************************************************************************
-*                                                                      *
-\subsection{Vectorisation declarations}
-*                                                                      *
-************************************************************************
-
-Representation of desugared vectorisation declarations that are fed to the vectoriser (via
-'ModGuts').
--}
-
-data CoreVect = Vect      Id   CoreExpr
-              | NoVect    Id
-              | VectType  Bool TyCon (Maybe TyCon)
-              | VectClass TyCon                     -- class tycon
-              | VectInst  Id                        -- instance dfun (always SCALAR)  !!!FIXME: should be superfluous now
 
 {-
 ************************************************************************
@@ -1834,12 +1830,12 @@ mkVarApps :: Expr b -> [Var] -> Expr b
 -- use 'MkCore.mkCoreConApps' if possible
 mkConApp      :: DataCon -> [Arg b] -> Expr b
 
-mkApps    f args = foldl App                       f args
-mkCoApps  f args = foldl (\ e a -> App e (Coercion a)) f args
-mkVarApps f vars = foldl (\ e a -> App e (varToCoreExpr a)) f vars
+mkApps    f args = foldl' App                       f args
+mkCoApps  f args = foldl' (\ e a -> App e (Coercion a)) f args
+mkVarApps f vars = foldl' (\ e a -> App e (varToCoreExpr a)) f vars
 mkConApp con args = mkApps (Var (dataConWorkId con)) args
 
-mkTyApps  f args = foldl (\ e a -> App e (mkTyArg a)) f args
+mkTyApps  f args = foldl' (\ e a -> App e (mkTyArg a)) f args
 
 mkConApp2 :: DataCon -> [Type] -> [Var] -> Expr b
 mkConApp2 con tys arg_ids = Var (dataConWorkId con)
@@ -2064,6 +2060,16 @@ collectArgs expr
     go (App f a) as = go f (a:as)
     go e         as = (e, as)
 
+-- | Attempt to remove the last N arguments of a function call.
+-- Strip off any ticks or coercions encountered along the way and any
+-- at the end.
+stripNArgs :: Word -> Expr a -> Maybe (Expr a)
+stripNArgs !n (Tick _ e) = stripNArgs n e
+stripNArgs n (Cast f _) = stripNArgs n f
+stripNArgs 0 e = Just e
+stripNArgs n (App f _) = stripNArgs (n - 1) f
+stripNArgs _ _ = Nothing
+
 -- | Like @collectArgs@, but also collects looks through floatable
 -- ticks if it means that we can find more arguments.
 collectArgsTicks :: (Tickish Id -> Bool) -> Expr b
@@ -2110,6 +2116,12 @@ isTyCoArg :: Expr b -> Bool
 isTyCoArg (Type {})     = True
 isTyCoArg (Coercion {}) = True
 isTyCoArg _             = False
+
+-- | Returns @True@ iff the expression is a 'Coercion'
+-- expression at its top level
+isCoArg :: Expr b -> Bool
+isCoArg (Coercion {}) = True
+isCoArg _             = False
 
 -- | Returns @True@ iff the expression is a 'Type' expression at its
 -- top level.  Note this does NOT include 'Coercion's.

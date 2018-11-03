@@ -35,6 +35,10 @@ test('OverIndirectThisMod', [], multimod_compile_fail, ['OverIndirectThisModD', 
 
 test('SkolemOccursLoop', expect_fail, compile_fail, [''])
 
+test('ExplicitForAllFams3', normal, compile_fail, [''])
+test('ExplicitForAllFams4a', normal, compile_fail, [''])
+test('ExplicitForAllFams4b', normal, compile_fail, [''])
+
 test('T2334A', normal, compile_fail, [''])
 test('T1900', normal, compile_fail, [''])
 test('T2157', normal, compile_fail, [''])
@@ -87,7 +91,6 @@ test('T7536', normal, compile_fail, [''])
 
 test('T7729', normal, compile_fail, [''])
 test('T7729a', normal, compile_fail, [''])
-test('T7786', normal, compile_fail, [''])
 
 test('NoGood', normal, compile_fail, [''])
 test('T7967', normal, compile_fail, [''])
@@ -140,4 +143,8 @@ test('T13972', normal, compile_fail, [''])
 test('T14033', normal, compile_fail, [''])
 test('T14045a', normal, compile_fail, [''])
 test('T14175', normal, compile_fail, [''])
+test('T14179', normal, compile_fail, [''])
+test('T14246', normal, compile_fail, [''])
 test('T14369', normal, compile_fail, [''])
+test('T15172', normal, compile_fail, [''])
+test('T14904', normal, compile_fail, [''])

@@ -1,7 +1,6 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE CPP, NoImplicitPrelude, ScopedTypeVariables, MagicHash #-}
 {-# LANGUAGE BangPatterns #-}
-{-# OPTIONS_HADDOCK hide #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -26,7 +25,8 @@ module GHC.List (
    scanr, scanr1, iterate, iterate', repeat, replicate, cycle,
    take, drop, sum, product, maximum, minimum, splitAt, takeWhile, dropWhile,
    span, break, reverse, and, or,
-   any, all, elem, notElem, lookup,
+   any, all, elem, notElem,
+   lookup,
    concatMap,
    zip, zip3, zipWith, zipWith3, unzip, unzip3,
    errorEmptyList,
@@ -444,7 +444,7 @@ minimum xs              =  foldl1 min xs
 -- > iterate f x == [x, f x, f (f x), ...]
 --
 -- Note that 'iterate' is lazy, potentially leading to thunk build-up if
--- the consumer doesn't force each iterate. See 'iterate\'' for a strict
+-- the consumer doesn't force each iterate. See 'iterate'' for a strict
 -- variant of this function.
 {-# NOINLINE [1] iterate #-}
 iterate :: (a -> a) -> a -> [a]
@@ -461,7 +461,7 @@ iterateFB c f x0 = go x0
  #-}
 
 
--- | 'iterate\'' is the strict version of 'iterate'.
+-- | 'iterate'' is the strict version of 'iterate'.
 --
 -- It ensures that the result of each application of force to weak head normal
 -- form before proceeding.
@@ -946,13 +946,21 @@ foldr2_left  k _z  x  r (y:ys) = k x y (r ys)
 -- Zips for larger tuples are in the List module.
 
 ----------------------------------------------
--- | /O(n)/ where n is the 'length' of the shorter of both lists. 'zip' takes
--- two lists and returns a list of corresponding pairs. If one input list is
--- short, excess elements of the longer list are discarded.
+
+-- | /O(min(m,n))/ 'zip' takes two lists and returns a list of corresponding pairs.
+--
+-- > zip [1, 2] ['a', 'b'] = [(1, 'a'), (2, 'b')]
+--
+-- If one input list is short, excess elements of the longer list are
+-- discarded:
+--
+-- > zip [1] ['a', 'b'] = [(1, 'a')]
+-- > zip [1, 2] ['a'] = [(1, 'a')]
 --
 -- 'zip' is right-lazy:
 --
 -- > zip [] _|_ = []
+-- > zip _|_ [] = _|_
 {-# NOINLINE [1] zip #-}
 zip :: [a] -> [b] -> [(a,b)]
 zip []     _bs    = []

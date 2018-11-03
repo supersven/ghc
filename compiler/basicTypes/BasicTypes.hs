@@ -45,14 +45,12 @@ module BasicTypes(
 
         TopLevelFlag(..), isTopLevel, isNotTopLevel,
 
-        DerivStrategy(..),
-
         OverlapFlag(..), OverlapMode(..), setOverlapModeMaybe,
         hasOverlappingFlag, hasOverlappableFlag, hasIncoherentFlag,
 
         Boxity(..), isBoxed,
 
-        TyPrec(..), maybeParen,
+        PprPrec(..), topPrec, sigPrec, opPrec, funPrec, appPrec, maybeParen,
 
         TupleSort(..), tupleSortBoxity, boxityTupleSort,
         tupleParens,
@@ -83,6 +81,7 @@ module BasicTypes(
 
         Activation(..), isActive, isActiveIn, competesWith,
         isNeverActive, isAlwaysActive, isEarlyActive,
+        activeAfterInitial, activeDuringFinal,
 
         RuleMatchInfo(..), isConLike, isFunLike,
         InlineSpec(..), noUserInlineSpec,
@@ -411,7 +410,7 @@ defaultFixity = Fixity NoSourceText maxPrecedence InfixL
 negateFixity, funTyFixity :: Fixity
 -- Wired-in fixities
 negateFixity = Fixity NoSourceText 6 InfixL  -- Fixity of unary negate
-funTyFixity  = Fixity NoSourceText 0 InfixR  -- Fixity of '->'
+funTyFixity  = Fixity NoSourceText (-1) InfixR  -- Fixity of '->', see #15235
 
 {-
 Consider
@@ -545,31 +544,6 @@ instance Outputable Origin where
 {-
 ************************************************************************
 *                                                                      *
-                Deriving strategies
-*                                                                      *
-************************************************************************
--}
-
--- | Which technique the user explicitly requested when deriving an instance.
-data DerivStrategy
-  -- See Note [Deriving strategies] in TcDeriv
-  = StockStrategy    -- ^ GHC's \"standard\" strategy, which is to implement a
-                     --   custom instance for the data type. This only works
-                     --   for certain types that GHC knows about (e.g., 'Eq',
-                     --   'Show', 'Functor' when @-XDeriveFunctor@ is enabled,
-                     --   etc.)
-  | AnyclassStrategy -- ^ @-XDeriveAnyClass@
-  | NewtypeStrategy  -- ^ @-XGeneralizedNewtypeDeriving@
-  deriving (Eq, Data)
-
-instance Outputable DerivStrategy where
-    ppr StockStrategy    = text "stock"
-    ppr AnyclassStrategy = text "anyclass"
-    ppr NewtypeStrategy  = text "newtype"
-
-{-
-************************************************************************
-*                                                                      *
                 Instance overlap flag
 *                                                                      *
 ************************************************************************
@@ -692,40 +666,25 @@ pprSafeOverlap False = empty
 {-
 ************************************************************************
 *                                                                      *
-                Type precedence
+                Precedence
 *                                                                      *
 ************************************************************************
 -}
 
-data TyPrec   -- See Note [Precedence in types] in TyCoRep.hs
-  = TopPrec         -- No parens
-  | FunPrec         -- Function args; no parens for tycon apps
-  | TyOpPrec        -- Infix operator
-  | TyConPrec       -- Tycon args; no parens for atomic
+-- | A general-purpose pretty-printing precedence type.
+newtype PprPrec = PprPrec Int deriving (Eq, Ord, Show)
+-- See Note [Precedence in types]
 
-instance Eq TyPrec where
-  (==) a b = case compare a b of
-               EQ -> True
-               _  -> False
+topPrec, sigPrec, funPrec, opPrec, appPrec :: PprPrec
+topPrec = PprPrec 0 -- No parens
+sigPrec = PprPrec 1 -- Explicit type signatures
+funPrec = PprPrec 2 -- Function args; no parens for constructor apps
+                    -- See [Type operator precedence] for why both
+                    -- funPrec and opPrec exist.
+opPrec  = PprPrec 2 -- Infix operator
+appPrec = PprPrec 3 -- Constructor args; no parens for atomic
 
-instance Ord TyPrec where
-  compare TopPrec TopPrec  = EQ
-  compare TopPrec _        = LT
-
-  compare FunPrec TopPrec   = GT
-  compare FunPrec FunPrec   = EQ
-  compare FunPrec TyOpPrec  = EQ   -- See Note [Type operator precedence]
-  compare FunPrec TyConPrec = LT
-
-  compare TyOpPrec TopPrec   = GT
-  compare TyOpPrec FunPrec   = EQ  -- See Note [Type operator precedence]
-  compare TyOpPrec TyOpPrec  = EQ
-  compare TyOpPrec TyConPrec = LT
-
-  compare TyConPrec TyConPrec = EQ
-  compare TyConPrec _         = GT
-
-maybeParen :: TyPrec -> TyPrec -> SDoc -> SDoc
+maybeParen :: PprPrec -> PprPrec -> SDoc -> SDoc
 maybeParen ctxt_prec inner_prec pretty
   | ctxt_prec < inner_prec = pretty
   | otherwise              = parens pretty
@@ -733,12 +692,12 @@ maybeParen ctxt_prec inner_prec pretty
 {- Note [Precedence in types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Many pretty-printing functions have type
-    ppr_ty :: TyPrec -> Type -> SDoc
+    ppr_ty :: PprPrec -> Type -> SDoc
 
-The TyPrec gives the binding strength of the context.  For example, in
+The PprPrec gives the binding strength of the context.  For example, in
    T ty1 ty2
 we will pretty-print 'ty1' and 'ty2' with the call
-  (ppr_ty TyConPrec ty)
+  (ppr_ty appPrec ty)
 to indicate that the context is that of an argument of a TyConApp.
 
 We use this consistently for Type and HsType.
@@ -751,16 +710,16 @@ pretty printer follows the following precedence order:
    TyConPrec         Type constructor application
    TyOpPrec/FunPrec  Operator application and function arrow
 
-We have FunPrec and TyOpPrec to represent the precedence of function
+We have funPrec and opPrec to represent the precedence of function
 arrow and type operators respectively, but currently we implement
-FunPred == TyOpPrec, so that we don't distinguish the two. Reason:
+funPrec == opPrec, so that we don't distinguish the two. Reason:
 it's hard to parse a type like
     a ~ b => c * d -> e - f
 
-By treating TyOpPrec = FunPrec we end up with more parens
+By treating opPrec = funPrec we end up with more parens
     (a ~ b) => (c * d) -> (e - f)
 
-But the two are different constructors of TyPrec so we could make
+But the two are different constructors of PprPrec so we could make
 (->) bind more or less tightly if we wanted.
 -}
 
@@ -1184,6 +1143,15 @@ instance Outputable CompilerPhase where
    ppr (Phase n)    = int n
    ppr InitialPhase = text "InitialPhase"
 
+activeAfterInitial :: Activation
+-- Active in the first phase after the initial phase
+-- Currently we have just phases [2,1,0]
+activeAfterInitial = ActiveAfter NoSourceText 2
+
+activeDuringFinal :: Activation
+-- Active in the final simplification phase (which is repeated)
+activeDuringFinal = ActiveAfter NoSourceText 0
+
 -- See note [Pragma source text]
 data Activation = NeverActive
                 | AlwaysActive
@@ -1478,9 +1446,12 @@ data IntegralLit
   deriving (Data, Show)
 
 mkIntegralLit :: Integral a => a -> IntegralLit
-mkIntegralLit i = IL { il_text = SourceText (show (fromIntegral i :: Int))
+mkIntegralLit i = IL { il_text = SourceText (show i_integer)
                      , il_neg = i < 0
-                     , il_value = toInteger i }
+                     , il_value = i_integer }
+  where
+    i_integer :: Integer
+    i_integer = toInteger i
 
 negateIntegralLit :: IntegralLit -> IntegralLit
 negateIntegralLit (IL text neg value)
@@ -1505,6 +1476,13 @@ data FractionalLit
 
 mkFractionalLit :: Real a => a -> FractionalLit
 mkFractionalLit r = FL { fl_text = SourceText (show (realToFrac r::Double))
+                           -- Converting to a Double here may technically lose
+                           -- precision (see #15502). We could alternatively
+                           -- convert to a Rational for the most accuracy, but
+                           -- it would cause Floats and Doubles to be displayed
+                           -- strangely, so we opt not to do this. (In contrast
+                           -- to mkIntegralLit, where we always convert to an
+                           -- Integer for the highest accuracy.)
                        , fl_neg = r < 0
                        , fl_value = toRational r }
 

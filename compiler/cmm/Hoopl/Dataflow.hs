@@ -30,6 +30,7 @@ module Hoopl.Dataflow
   , rewriteCmmBwd
   , changedIf
   , joinOutFacts
+  , joinFacts
   )
 where
 
@@ -39,7 +40,6 @@ import Cmm
 import UniqSupply
 
 import Data.Array
-import Data.List
 import Data.Maybe
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
@@ -373,6 +373,11 @@ joinOutFacts lattice nonLocal fact_base = foldl' join (fact_bot lattice) facts
         , let fact = lookupFact s fact_base
         , isJust fact
         ]
+
+joinFacts :: DataflowLattice f -> [f] -> f
+joinFacts lattice facts  = foldl' join (fact_bot lattice) facts
+  where
+    join new old = getJoined $ fact_join lattice (OldFact old) (NewFact new)
 
 -- | Returns the joined facts for each label.
 mkFactBase :: DataflowLattice f -> [(Label, f)] -> FactBase f

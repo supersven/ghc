@@ -40,6 +40,7 @@ import Module           ( ModuleName )
 
 
 -- Various other random stuff that we need
+import GHC.HandleEncoding
 import Config
 import Constants
 import HscTypes
@@ -73,6 +74,7 @@ import Control.Monad
 import Data.Char
 import Data.List
 import Data.Maybe
+import Prelude
 
 -----------------------------------------------------------------------------
 -- ToDo:
@@ -92,18 +94,7 @@ main = do
    hSetBuffering stdout LineBuffering
    hSetBuffering stderr LineBuffering
 
-   -- Handle GHC-specific character encoding flags, allowing us to control how
-   -- GHC produces output regardless of OS.
-   env <- getEnvironment
-   case lookup "GHC_CHARENC" env of
-    Just "UTF-8" -> do
-     hSetEncoding stdout utf8
-     hSetEncoding stderr utf8
-    _ -> do
-     -- Avoid GHC erroring out when trying to display unhandled characters
-     hSetTranslit stdout
-     hSetTranslit stderr
-
+   configureHandleEncoding
    GHC.defaultErrorHandler defaultFatalMessager defaultFlushOut $ do
     -- 1. extract the -B flag from the args
     argv0 <- getArgs
@@ -222,9 +213,23 @@ main' postLoadMode dflags0 args flagWarnings = do
 
   let
      -- To simplify the handling of filepaths, we normalise all filepaths right
-     -- away - e.g., for win32 platforms, backslashes are converted
-     -- into forward slashes.
-    normal_fileish_paths = map (normalise . unLoc) fileish_args
+     -- away. Note the asymmetry of FilePath.normalise:
+     --    Linux:   p/q -> p/q; p\q -> p\q
+     --    Windows: p/q -> p\q; p\q -> p\q
+     -- #12674: Filenames starting with a hypen get normalised from ./-foo.hs
+     -- to -foo.hs. We have to re-prepend the current directory.
+    normalise_hyp fp
+        | strt_dot_sl && "-" `isPrefixOf` nfp = cur_dir ++ nfp
+        | otherwise                           = nfp
+        where
+#if defined(mingw32_HOST_OS)
+          strt_dot_sl = "./" `isPrefixOf` fp || ".\\" `isPrefixOf` fp
+#else
+          strt_dot_sl = "./" `isPrefixOf` fp
+#endif
+          cur_dir = '.' : [pathSeparator]
+          nfp = normalise fp
+    normal_fileish_paths = map (normalise_hyp . unLoc) fileish_args
     (srcs, objs)         = partition_args normal_fileish_paths [] []
 
     dflags5 = dflags4 { ldInputs = map (FileOption "") objs
@@ -800,14 +805,21 @@ dumpFinalStats dflags =
 
 dumpFastStringStats :: DynFlags -> IO ()
 dumpFastStringStats dflags = do
-  buckets <- getFastStringTable
-  let (entries, longest, has_z) = countFS 0 0 0 buckets
-      msg = text "FastString stats:" $$
-            nest 4 (vcat [text "size:           " <+> int (length buckets),
-                          text "entries:        " <+> int entries,
-                          text "longest chain:  " <+> int longest,
-                          text "has z-encoding: " <+> (has_z `pcntOf` entries)
-                         ])
+  segments <- getFastStringTable
+  let buckets = concat segments
+      bucketsPerSegment = map length segments
+      entriesPerBucket = map length buckets
+      entries = sum entriesPerBucket
+      hasZ = sum $ map (length . filter hasZEncoding) buckets
+      msg = text "FastString stats:" $$ nest 4 (vcat
+        [ text "segments:         " <+> int (length segments)
+        , text "buckets:          " <+> int (sum bucketsPerSegment)
+        , text "entries:          " <+> int entries
+        , text "largest segment:  " <+> int (maximum bucketsPerSegment)
+        , text "smallest segment: " <+> int (minimum bucketsPerSegment)
+        , text "longest bucket:   " <+> int (maximum entriesPerBucket)
+        , text "has z-encoding:   " <+> (hasZ `pcntOf` entries)
+        ])
         -- we usually get more "has z-encoding" than "z-encoded", because
         -- when we z-encode a string it might hash to the exact same string,
         -- which is not counted as "z-encoded".  Only strings whose
@@ -816,17 +828,6 @@ dumpFastStringStats dflags = do
   putMsg dflags msg
   where
    x `pcntOf` y = int ((x * 100) `quot` y) Outputable.<> char '%'
-
-countFS :: Int -> Int -> Int -> [[FastString]] -> (Int, Int, Int)
-countFS entries longest has_z [] = (entries, longest, has_z)
-countFS entries longest has_z (b:bs) =
-  let
-        len = length b
-        longest' = max len longest
-        entries' = entries + len
-        has_zs = length (filter hasZEncoding b)
-  in
-        countFS entries' longest' (has_z + has_zs) bs
 
 showPackages, dumpPackages, dumpPackagesSimple :: DynFlags -> IO ()
 showPackages       dflags = putStrLn (showSDoc dflags (pprPackages dflags))
@@ -939,5 +940,18 @@ people since we're linking GHC dynamically, but most things themselves
 link statically.
 -}
 
+-- If GHC_LOADED_INTO_GHCI is not set when GHC is loaded into GHCi, then
+-- running it causes an error like this:
+--
+-- Loading temp shared object failed:
+-- /tmp/ghc13836_0/libghc_1872.so: undefined symbol: initGCStatistics
+--
+-- Skipping the foreign call fixes this problem, and the outer GHCi
+-- should have already made this call anyway.
+#if defined(GHC_LOADED_INTO_GHCI)
+initGCStatistics :: IO ()
+initGCStatistics = return ()
+#else
 foreign import ccall safe "initGCStatistics"
   initGCStatistics :: IO ()
+#endif

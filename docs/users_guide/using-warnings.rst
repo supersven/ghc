@@ -8,8 +8,13 @@ Warnings and sanity-checking
    single: warnings
 
 GHC has a number of options that select which types of non-fatal error
-messages, otherwise known as warnings, can be generated during
-compilation. By default, you get a standard set of warnings which are
+messages, otherwise known as warnings, can be generated during compilation.
+Some options control individual warnings and others control collections
+of warnings.
+To turn off an individual warning ``-W<wflag>``, use ``-Wno-<wflag>``.
+To reverse``-Werror``, which makes all warnings into errors, use ``-Wwarn``.
+
+By default, you get a standard set of warnings which are
 generally likely to indicate bugs in your program. These are:
 
 .. hlist::
@@ -20,19 +25,26 @@ generally likely to indicate bugs in your program. These are:
     * :ghc-flag:`-Wdeprecations`
     * :ghc-flag:`-Wdeprecated-flags`
     * :ghc-flag:`-Wunrecognised-pragmas`
-    * :ghc-flag:`-Wduplicate-constraints`
     * :ghc-flag:`-Wduplicate-exports`
     * :ghc-flag:`-Woverflowed-literals`
     * :ghc-flag:`-Wempty-enumerations`
     * :ghc-flag:`-Wmissing-fields`
     * :ghc-flag:`-Wmissing-methods`
     * :ghc-flag:`-Wwrong-do-bind`
+    * :ghc-flag:`-Wsimplifiable-class-constraints`
+    * :ghc-flag:`-Wtyped-holes`
+    * :ghc-flag:`-Wdeferred-type-errors`
+    * :ghc-flag:`-Wpartial-type-signatures`
     * :ghc-flag:`-Wunsupported-calling-conventions`
     * :ghc-flag:`-Wdodgy-foreign-imports`
     * :ghc-flag:`-Winline-rule-shadowing`
     * :ghc-flag:`-Wunsupported-llvm-version`
     * :ghc-flag:`-Wtabs`
     * :ghc-flag:`-Wunrecognised-warning-flags`
+    * :ghc-flag:`-Winaccessible-code`
+    * :ghc-flag:`-Wstar-is-type`
+    * :ghc-flag:`-Wstar-binder`
+    * :ghc-flag:`-Wspace-after-bang`
 
 The following flags are simple ways to select standard "packages" of warnings:
 
@@ -80,6 +92,8 @@ The following flags are simple ways to select standard "packages" of warnings:
         * :ghc-flag:`-Widentities`
         * :ghc-flag:`-Wredundant-constraints`
         * :ghc-flag:`-Wpartial-fields`
+        * :ghc-flag:`-Wmissed-specialisations`
+        * :ghc-flag:`-Wall-missed-specialisations`
 
 .. ghc-flag:: -Weverything
     :shortdesc: enable all warnings supported by GHC
@@ -108,6 +122,8 @@ The following flags are simple ways to select standard "packages" of warnings:
         * :ghc-flag:`-Wmissing-monadfail-instances`
         * :ghc-flag:`-Wsemigroup`
         * :ghc-flag:`-Wnoncanonical-monoid-instances`
+        * :ghc-flag:`-Wimplicit-kind-vars`
+        * :ghc-flag:`-Wstar-is-type`
 
 .. ghc-flag:: -Wno-compat
     :shortdesc: Disables all warnings enabled by :ghc-flag:`-Wcompat`.
@@ -135,7 +151,9 @@ to abort.
     :category:
 
     Makes any warning into a fatal error. Useful so that you don't miss
-    warnings when doing batch compilation.
+    warnings when doing batch compilation. To reverse ``-Werror`` and stop
+    treating any warnings as errors use ``-Wwarn``, or use ``-Wwarn=<wflag>``
+    to stop treating specific warnings as errors.
 
 .. ghc-flag:: -Werror=⟨wflag⟩
     :shortdesc: make a specific warning fatal
@@ -147,7 +165,10 @@ to abort.
     :implies: ``-W<wflag>``
 
     Makes a specific warning into a fatal error. The warning will be enabled if
-    it hasn't been enabled yet.
+    it hasn't been enabled yet. Can be reversed with ``-Wwarn=<wflag>``.
+
+    ``-Werror=compat`` has the same effect as ``-Werror=...`` for each warning
+    flag in the :ghc-flag:`-Wcompat` option group.
 
 .. ghc-flag:: -Wwarn
     :shortdesc: make warnings non-fatal
@@ -169,6 +190,9 @@ to abort.
 
     Note that it doesn't fully negate the effects of ``-Werror=<wflag>`` - the
     warning will still be enabled.
+
+    ``-Wwarn=compat`` has the same effect as ``-Wwarn=...`` for each warning
+    flag in the :ghc-flag:`-Wcompat` option group.
 
 When a warning is emitted, the specific warning flag which controls
 it is shown.
@@ -275,7 +299,7 @@ of ``-W(no-)*``.
 
     Defer variable out-of-scope errors (errors about names without a leading underscore)
     until runtime. This will turn variable-out-of-scope errors into warnings.
-    Using a value that depends on a typed hole produces a runtime error,
+    Using a value that depends on an out-of-scope variable produces a runtime error,
     the same as :ghc-flag:`-fdefer-type-errors` (which implies this option).
     See :ref:`typed-holes` and :ref:`defer-type-errors`.
 
@@ -401,22 +425,6 @@ of ``-W(no-)*``.
     An alias for :ghc-flag:`-Wwarnings-deprecations`.
 
     This option is on by default.
-
-.. ghc-flag:: -Wamp
-    :shortdesc: *(deprecated)* warn on definitions conflicting with the
-        Applicative-Monad Proposal (AMP)
-    :type: dynamic
-    :reverse: -Wno-amp
-    :category:
-
-    .. index::
-       single: AMP
-       single: Applicative-Monad Proposal
-
-    This option is deprecated.
-
-    Caused a warning to be emitted when a definition was in conflict with
-    the AMP (Applicative-Monad proosal).
 
 .. ghc-flag:: -Wnoncanonical-monad-instances
     :shortdesc: warn when ``Applicative`` or ``Monad`` instances have
@@ -685,7 +693,7 @@ of ``-W(no-)*``.
     Similar warnings are given for a redundant constraint in an instance
     declaration.
 
-    When turning on, you can suppress it on a per-module basis with 
+    When turning on, you can suppress it on a per-module basis with
     :ghc-flag:`-Wno-redundant-constraints <-Wredundant-constraints>`.
     Occasionally you may specifically want a function to have a more
     constrained signature than necessary, perhaps to leave yourself
@@ -766,6 +774,58 @@ of ``-W(no-)*``.
     being compiled).
 
     This warning is off by default.
+
+.. ghc-flag:: -Wimplicit-kind-vars
+    :shortdesc: warn when kind variables are brought into scope implicitly despite
+        the "forall-or-nothing" rule
+    :type: dynamic
+    :reverse: -Wno-implicit-kind-vars
+    :category:
+
+    :since: 8.6
+
+    `GHC proposal #24
+    <https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0024-no-kind-vars.rst>`__
+    prescribes to treat kind variables and type variables identically in
+    ``forall``, removing the legacy distinction between them.
+
+    Consider the following examples: ::
+
+        f :: Proxy a -> Proxy b -> ()
+        g :: forall a b. Proxy a -> Proxy b -> ()
+
+    ``f`` does not use an explicit ``forall``, so type variables ``a`` and ``b``
+    are brought into scope implicitly. ``g`` quantifies both ``a`` and ``b``
+    explicitly. Both ``f`` and ``g`` work today and will continue to work in the
+    future because they adhere to the "forall-or-nothing" rule: either all type
+    variables in a function definition are introduced explicitly or implicitly,
+    there is no middle ground.
+
+    A violation of the "forall-or-nothing" rule looks like this: ::
+
+        m :: forall a. Proxy a -> Proxy b -> ()
+
+    ``m`` does not introduce one of the variables, ``b``, and thus is rejected.
+
+    However, consider the following example: ::
+
+        n :: forall a. Proxy (a :: k) -> ()
+
+    While ``n`` uses ``k`` without introducing it and thus violates the rule, it
+    is currently accepted. This is because ``k`` in ``n`` is considered a kind
+    variable, as it occurs in a kind signature. In reality, the line between
+    type variables and kind variables is blurry, as the following example
+    demonstrates: ::
+
+        kindOf :: forall a. Proxy (a :: k) -> Proxy k
+
+    In ``kindOf``, the ``k`` variable is used both in a kind position and a type
+    position. Currently, ``kindOf`` happens to be accepted as well.
+
+    In a future release of GHC, both ``n`` and ``kindOf`` will be rejected per
+    the "forall-or-nothing" rule. This warning, being part of the
+    :ghc-flag:`-Wcompat` option group, allows to detect this before the actual
+    breaking change takes place.
 
 .. ghc-flag:: -Wincomplete-patterns
     :shortdesc: warn when a pattern match could fail
@@ -1088,11 +1148,99 @@ of ``-W(no-)*``.
     second pattern overlaps it. More often than not, redundant patterns
     is a programmer mistake/error, so this option is enabled by default.
 
+.. ghc-flag:: -Winaccessible-code
+    :shortdesc: warn about inaccessible code
+    :type: dynamic
+    :reverse: -Wno-inaccessible-code
+    :category:
+
+    .. index::
+       single: inaccessible code, warning
+       single: inaccessible
+
+    By default, the compiler will warn you if types make a branch inaccessible.
+    This generally requires GADTs or similar extensions.
+
+    Take, for example, the following program ::
+
+        {-# LANGUAGE GADTs #-}
+
+        data Foo a where
+         Foo1 :: Foo Char
+         Foo2 :: Foo Int
+
+        data TyEquality a b where
+                Refl :: TyEquality a a
+
+        checkTEQ :: Foo t -> Foo u -> Maybe (TyEquality t u)
+        checkTEQ x y = error "unimportant"
+
+        step2 :: Bool
+        step2 = case checkTEQ Foo1 Foo2 of
+                 Just Refl -> True -- Inaccessible code
+                 Nothing -> False
+
+    The ``Just Refl`` case in ``step2`` is inaccessible, because in order for
+    ``checkTEQ`` to be able to produce a ``Just``, ``t ~ u`` must hold, but
+    since we're passing ``Foo1`` and ``Foo2`` here, it follows that ``t ~
+    Char``, and ``u ~ Int``, and thus ``t ~ u`` cannot hold.
+
+.. ghc-flag:: -Wstar-is-type
+     :shortdesc: warn when ``*`` is used to mean ``Data.Kind.Type``
+     :type: dynamic
+     :reverse: -Wno-star-is-type
+     :category:
+
+     :since: 8.6
+
+     The use of ``*`` to denote the kind of inhabited types relies on the
+     :extension:`StarIsType` extension, which in a future release will be
+     turned off by default and then possibly removed. The reasons for this and
+     the deprecation schedule are described in `GHC proposal #30
+     <https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0030-remove-star-kind.rst>`__.
+
+     This warning allows to detect such uses of ``*`` before the actual
+     breaking change takes place. The recommended fix is to replace ``*`` with
+     ``Type`` imported from ``Data.Kind``.
+
+     Being part of the :ghc-flag:`-Wcompat` option group, this warning is off by
+     default, but will be switched on in a future GHC release.
+
+.. ghc-flag:: -Wstar-binder
+     :shortdesc: warn about binding the ``(*)`` type operator despite
+         :ghc-flag:`-XStarIsType`
+     :type: dynamic
+     :reverse: -Wno-star-binder
+
+     Under :ghc-flag:`-XStarIsType`, a ``*`` in types is not an operator nor
+     even a name, it is special syntax that stands for ``Data.Kind.Type``. This
+     means that an expression like ``Either * Char`` is parsed as ``Either (*)
+     Char`` and not ``(*) Either Char``.
+
+     In binding positions, we have similar parsing rules. Consider the following
+     example ::
+
+         {-# LANGUAGE TypeOperators, TypeFamilies, StarIsType #-}
+
+         type family a + b
+         type family a * b
+
+     While ``a + b`` is parsed as ``(+) a b`` and becomes a binding position for
+     the ``(+)`` type operator, ``a * b`` is parsed as ``a (*) b`` and is rejected.
+
+     As a workaround, we allow to bind ``(*)`` in prefix form::
+
+         type family (*) a b
+
+     This is a rather fragile arrangement, as generally a programmer expects
+     ``(*) a b`` to be equivalent to ``a * b``. With :ghc-flag:`-Wstar-binder`
+     we warn when this special treatment of ``(*)`` takes place.
+
 .. ghc-flag:: -Wsimplifiable-class-constraints
-    :shortdesc: 2arn about class constraints in a type signature that can
+    :shortdesc: Warn about class constraints in a type signature that can
         be simplified using a top-level instance declaration.
     :type: dynamic
-    :reverse: -Wno-overlapping-patterns
+    :reverse: -Wno-simplifiable-class-constraints
     :category:
 
     :since: 8.2
@@ -1116,6 +1264,12 @@ of ``-W(no-)*``.
     per-module basis with :ghc-flag:`-Wno-simplifiable-class-constraints
     <-Wsimplifiable-class-constraints>`.
 
+.. ghc-flag:: -Wspace-after-bang
+     :shortdesc: warn for missing space before the second argument
+        of an infix definition of ``(!)`` when
+        :ghc-flag:`-XBangPatterns` are not enabled
+     :type: dynamic
+     :reverse: -Wno-missing-space-after-bang
 .. ghc-flag:: -Wtabs
     :shortdesc: warn if there are tabs in the source file
     :type: dynamic
@@ -1356,7 +1510,7 @@ of ``-W(no-)*``.
         do { mapM_ popInt xs ; return 10 }
 
 .. ghc-flag:: -Wunused-type-patterns
-    :shortdesc: warn about unused type variables which arise from patterns
+    :shortdesc: warn about unused type variables which arise from patterns in
         in type family and data family instances
     :type: dynamic
     :reverse: -Wno-unused-type-patterns
@@ -1366,22 +1520,30 @@ of ``-W(no-)*``.
        single: unused type patterns, warning
        single: type patterns, unused
 
-    Report all unused type variables which arise from patterns in type family
-    and data family instances. For instance: ::
+    Report all unused implicitly bound type variables which arise from
+    patterns in type family and data family instances. For instance: ::
 
         type instance F x y = []
 
-    would report ``x`` and ``y`` as unused. The warning is suppressed if the
-    type variable name begins with an underscore, like so: ::
+    would report ``x`` and ``y`` as unused on the right hand side. The warning
+    is suppressed if the type variable name begins with an underscore, like
+    so: ::
 
         type instance F _x _y = []
+
+    When :extension:`ExplicitForAll` is enabled, explicitly quantified type
+    variables may also be identified as unused. For instance: ::
+      
+        type instance forall x y. F x y = []
+    
+    would still report ``x`` and ``y`` as unused on the right hand side
 
     Unlike :ghc-flag:`-Wunused-matches`, :ghc-flag:`-Wunused-type-patterns` is
     not implied by :ghc-flag:`-Wall`. The rationale for this decision is that
     unlike term-level pattern names, type names are often chosen expressly for
     documentation purposes, so using underscores in type names can make the
     documentation harder to read.
-
+    
 .. ghc-flag:: -Wunused-foralls
     :shortdesc: warn about type variables in user-written
         ``forall``\\s that are unused

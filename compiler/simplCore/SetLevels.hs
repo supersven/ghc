@@ -87,7 +87,7 @@ import Literal          ( litIsTrivial )
 import Demand           ( StrictSig, Demand, isStrictDmd, splitStrictSig, increaseStrictSigArity )
 import Name             ( getOccName, mkSystemVarName )
 import OccName          ( occNameString )
-import Type             ( Type, mkLamTypes, splitTyConApp_maybe, tyCoVarsOfType )
+import Type             ( Type, mkLamTypes, splitTyConApp_maybe, tyCoVarsOfType, closeOverKindsDSet )
 import BasicTypes       ( Arity, RecFlag(..), isRec )
 import DataCon          ( dataConOrigResTy )
 import TysWiredIn
@@ -402,13 +402,13 @@ lvlApp env orig_expr ((_,AnnVar fn), args)
   , Nothing <- isClassOpId_maybe fn
   =  do { rargs' <- mapM (lvlNonTailMFE env False) rargs
         ; lapp'  <- lvlNonTailMFE env False lapp
-        ; return (foldl App lapp' rargs') }
+        ; return (foldl' App lapp' rargs') }
 
   | otherwise
   = do { (_, args') <- mapAccumLM lvl_arg stricts args
             -- Take account of argument strictness; see
             -- Note [Floating to the top]
-       ; return (foldl App (lookupVar env fn) args') }
+       ; return (foldl' App (lookupVar env fn) args') }
   where
     n_val_args = count (isValArg . deAnnotate) args
     arity      = idArity fn
@@ -449,7 +449,7 @@ lvlApp env _ (fun, args)
      -- arguments and the function.
      do { args' <- mapM (lvlNonTailMFE env False) args
         ; fun'  <- lvlNonTailExpr env fun
-        ; return (foldl App fun' args') }
+        ; return (foldl' App fun' args') }
 
 -------------------------------------------
 lvlCase :: LevelEnv             -- Level of in-scope names/tyvars
@@ -1269,7 +1269,7 @@ substBndrsSL :: RecFlag -> LevelEnv -> [InVar] -> (LevelEnv, [OutVar])
 -- So named only to avoid the name clash with CoreSubst.substBndrs
 substBndrsSL is_rec env@(LE { le_subst = subst, le_env = id_env }) bndrs
   = ( env { le_subst    = subst'
-          , le_env      = foldl add_id  id_env (bndrs `zip` bndrs') }
+          , le_env      = foldl' add_id  id_env (bndrs `zip` bndrs') }
     , bndrs')
   where
     (subst', bndrs') = case is_rec of
@@ -1478,7 +1478,7 @@ addLvl :: Level -> VarEnv Level -> OutVar -> VarEnv Level
 addLvl dest_lvl env v' = extendVarEnv env v' dest_lvl
 
 addLvls :: Level -> VarEnv Level -> [OutVar] -> VarEnv Level
-addLvls dest_lvl env vs = foldl (addLvl dest_lvl) env vs
+addLvls dest_lvl env vs = foldl' (addLvl dest_lvl) env vs
 
 floatLams :: LevelEnv -> Maybe Int
 floatLams le = floatOutLambdas (le_switches le)
@@ -1558,17 +1558,14 @@ abstractVars :: Level -> LevelEnv -> DVarSet -> [OutVar]
         -- Uniques are not deterministic.
 abstractVars dest_lvl (LE { le_subst = subst, le_lvl_env = lvl_env }) in_fvs
   =  -- NB: sortQuantVars might not put duplicates next to each other
-    map zap $ sortQuantVars $ uniq
-    [out_var | out_fv  <- dVarSetElems (substDVarSet subst in_fvs)
-             , out_var <- dVarSetElems (close out_fv)
-             , abstract_me out_var ]
+    map zap $ sortQuantVars $
+    filter abstract_me      $
+    dVarSetElems            $
+    closeOverKindsDSet      $
+    substDVarSet subst in_fvs
         -- NB: it's important to call abstract_me only on the OutIds the
         -- come from substDVarSet (not on fv, which is an InId)
   where
-    uniq :: [Var] -> [Var]
-        -- Remove duplicates, preserving order
-    uniq = dVarSetElems . mkDVarSet
-
     abstract_me v = case lookupVarEnv lvl_env v of
                         Just lvl -> dest_lvl `ltLvl` lvl
                         Nothing  -> False
@@ -1580,12 +1577,6 @@ abstractVars dest_lvl (LE { le_subst = subst, le_lvl_env = lvl_env }) in_fvs
                            text "absVarsOf: discarding info on" <+> ppr v )
                      setIdInfo v vanillaIdInfo
           | otherwise = v
-
-    close :: Var -> DVarSet  -- Close over variables free in the type
-                             -- Result includes the input variable itself
-    close v = foldDVarSet (unionDVarSet . close)
-                          (unitDVarSet v)
-                          (fvDVarSet $ varTypeTyCoFVs v)
 
 type LvlM result = UniqSM result
 
@@ -1604,8 +1595,8 @@ newPolyBndrs dest_lvl
       ; let new_bndrs = zipWith mk_poly_bndr bndrs uniqs
             bndr_prs  = bndrs `zip` new_bndrs
             env' = env { le_lvl_env = addLvls dest_lvl lvl_env new_bndrs
-                       , le_subst   = foldl add_subst subst   bndr_prs
-                       , le_env     = foldl add_id    id_env  bndr_prs }
+                       , le_subst   = foldl' add_subst subst   bndr_prs
+                       , le_env     = foldl' add_id    id_env  bndr_prs }
       ; return (env', new_bndrs) }
   where
     add_subst env (v, v') = extendIdSubst env v (mkVarApps (Var v') abs_vars)
@@ -1648,7 +1639,7 @@ newLvlVar lvld_rhs join_arity_maybe is_mk_static
       = mkExportedVanillaId (mkSystemVarName uniq (mkFastString "static_ptr"))
                             rhs_ty
       | otherwise
-      = mkLocalIdOrCoVar (mkSystemVarName uniq (mkFastString "lvl")) rhs_ty
+      = mkSysLocalOrCoVar (mkFastString "lvl") uniq rhs_ty
 
 cloneCaseBndrs :: LevelEnv -> Level -> [Var] -> LvlM (LevelEnv, [Var])
 cloneCaseBndrs env@(LE { le_subst = subst, le_lvl_env = lvl_env, le_env = id_env })
@@ -1659,7 +1650,7 @@ cloneCaseBndrs env@(LE { le_subst = subst, le_lvl_env = lvl_env, le_env = id_env
                         , le_join_ceil = new_lvl
                         , le_lvl_env   = addLvls new_lvl lvl_env vs'
                         , le_subst     = subst'
-                        , le_env       = foldl add_id id_env (vs `zip` vs') }
+                        , le_env       = foldl' add_id id_env (vs `zip` vs') }
 
        ; return (env', vs') }
 
@@ -1681,7 +1672,7 @@ cloneLetVars is_rec
              prs  = vs `zip` vs2
              env' = env { le_lvl_env = addLvls dest_lvl lvl_env vs2
                         , le_subst   = subst'
-                        , le_env     = foldl add_id id_env prs }
+                        , le_env     = foldl' add_id id_env prs }
 
        ; return (env', vs2) }
   where

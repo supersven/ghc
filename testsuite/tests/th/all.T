@@ -76,6 +76,10 @@ test('TH_reifyMkName', normal, compile, ['-v0'])
 
 test('TH_reifyInstances', normal, compile, ['-v0'])
 
+test('TH_reifyExplicitForAllFams', normal, compile, ['-v0'])
+test('TH_ExplicitForAllRules', normal, multimod_compile_and_run,
+     ['TH_ExplicitForAllRules.hs', '-v0 ' + config.ghc_th_way_flags])
+
 test('TH_spliceDecl1', normal, compile, ['-v0'])
 test('TH_spliceDecl2', normal, compile, ['-v0'])
 test('TH_spliceDecl3', [], multimod_compile,
@@ -305,7 +309,7 @@ test('TH_Lift', normal, compile, ['-v0'])
 test('T10047', only_ways(['ghci']), ghci_script, ['T10047.script'])
 test('T10019', only_ways(['ghci']), ghci_script, ['T10019.script'])
 test('T10267', [], multimod_compile_fail,
-     ['T10267', '-fno-max-valid-substitutions -dsuppress-uniques -v0 ' + config.ghc_th_way_flags])
+     ['T10267', '-fno-max-valid-hole-fits -dsuppress-uniques -v0 ' + config.ghc_th_way_flags])
 test('T10279', normal, compile_fail, ['-v0'])
 test('T10306', normal, compile, ['-v0'])
 test('T10596', normal, compile, ['-v0'])
@@ -360,6 +364,7 @@ test('T11629', normal, compile, ['-v0'])
 test('T8761', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
 test('T12130', [], multimod_compile,
      ['T12130', '-v0 ' + config.ghc_th_way_flags])
+test('T12387', normal, compile_fail, ['-v0'])
 test('T12403', omit_ways(['ghci']),
               compile_and_run, ['-v0 -ddump-splices -dsuppress-uniques'])
 test('T12407', omit_ways(['ghci']), compile, ['-v0'])
@@ -406,7 +411,40 @@ test('T14869', normal, compile,
     ['-v0 -ddump-splices -dsuppress-uniques ' + config.ghc_th_way_flags])
 test('T14888', normal, compile,
     ['-v0 -ddump-splices -dsuppress-uniques ' + config.ghc_th_way_flags])
-test('T14298', normal, compile_and_run, ['-v0'])
+# There is a phasing issue in the ghci way which prevents us from being
+# able to compile and link the foreign file while compiling the haskell module.
+test('T14298', expect_broken_for(15161, ['ghci']), compile_and_run, ['-v0'])
+test('T14875', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
 test('T14885a', normal, compile, [''])
 test('T14885b', normal, compile, [''])
 test('T14885c', normal, compile, [''])
+test('T15243', normal, compile, ['-dsuppress-uniques'])
+test('T15321', normal, compile_fail, [''])
+test('T15324', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15331', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15365', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15360a', normal, compile, [''])
+test('T15360b', normal, compile_fail, [''])
+# Note: T9693 should be only_ways(['ghci']) once it's fixed.
+test('T9693', expect_broken(9693), ghci_script, ['T9693.script'])
+test('T14471', normal, compile, [''])
+test('TH_rebindableAdo', normal, compile, [''])
+test('T14627', normal, compile_fail, [''])
+test('TH_invalid_add_top_decl', normal, compile_fail, [''])
+test('T15550', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15502', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15518', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15572', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('TH_implicitParams', normal, compile_and_run, ['-v0 -dsuppress-uniques'])
+test('TH_implicitParamsErr1', normal, compile_fail, ['-v0 -dsuppress-uniques'])
+test('TH_implicitParamsErr2', normal, compile_fail, ['-v0 -dsuppress-uniques'])
+test('TH_implicitParamsErr3', normal, compile_fail, ['-v0 -dsuppress-uniques'])
+test('TH_recursiveDo', normal, compile_and_run, ['-v0 -dsuppress-uniques'])
+test('T15481', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('TH_recover_warns', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15738', normal, compile, ['-v0 -ddump-splices -dsuppress-uniques'])
+test('T15783', normal, multimod_compile,
+    ['T15783A', '-v0 ' + config.ghc_th_way_flags])
+test('T15792', normal, compile, ['-v0 -dsuppress-uniques'])
+test('T15815', normal, multimod_compile,
+    ['T15815B', '-v0 ' + config.ghc_th_way_flags])

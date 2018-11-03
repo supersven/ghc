@@ -1,20 +1,20 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeInType #-}
+{-# LANGUAGE PolyKinds #-}
 module T11732c where
 
 import Data.Kind
 
-class Cat k (cat :: k -> k -> *) where
+class Cat k (cat :: k -> k -> Type) where
   catId   :: cat a a
   catComp :: cat b c -> cat a b -> cat a c
 
-instance Cat * (->) where
+instance Cat Type (->) where
   catId   = id
   catComp = (.)
 
-newtype Fun2 a b = Fun2 (a -> b) deriving (Cat *)
+newtype Fun2 a b = Fun2 (a -> b) deriving (Cat Type)
 
 -- The ticket says this should work:
 --   newtype Fun1 a b = Fun1 (a -> b) deriving (Cat k)

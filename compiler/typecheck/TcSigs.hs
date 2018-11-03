@@ -297,18 +297,38 @@ Once we get to type checking, we decompose it into its parts, in tcPatSynSig.
   universal and existential vars.
 
 * After we kind-check the pieces and convert to Types, we do kind generalisation.
+
+Note [solveEqualities in tcPatSynSig]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+It's important that we solve /all/ the equalities in a pattern
+synonym signature, because we are going to zonk the signature to
+a Type (not a TcType), in TcPatSyn.tc_patsyn_finish, and that
+fails if there are un-filled-in coercion variables mentioned
+in the type (Trac #15694).
+
+The best thing is simply to use solveEqualities to solve all the
+equalites, rather than leaving them in the ambient constraints
+to be solved later.  Pattern synonyms are top-level, so there's
+no problem with completely solving them.
+
+(NB: this solveEqualities wraps tcImplicitTKBndrs, which itself
+does a solveLocalEqualities; so solveEqualities isn't going to
+make any further progress; it'll just report any unsolved ones,
+and fail, as it should.)
 -}
 
 tcPatSynSig :: Name -> LHsSigType GhcRn -> TcM TcPatSynInfo
 -- See Note [Pattern synonym signatures]
 -- See Note [Recipe for checking a signature] in TcHsType
 tcPatSynSig name sig_ty
-  | HsIB { hsib_ext = HsIBRn { hsib_vars = implicit_hs_tvs }
+  | HsIB { hsib_ext = implicit_hs_tvs
          , hsib_body = hs_ty }  <- sig_ty
   , (univ_hs_tvs, hs_req,  hs_ty1)     <- splitLHsSigmaTy hs_ty
   , (ex_hs_tvs,   hs_prov, hs_body_ty) <- splitLHsSigmaTy hs_ty1
-  = do { (implicit_tvs, (univ_tvs, (ex_tvs, (req, prov, body_ty))))
-           <-  -- NB: tcImplicitTKBndrs calls solveEqualities
+  = do {  traceTc "tcPatSynSig 1" (ppr sig_ty)
+       ; (implicit_tvs, (univ_tvs, (ex_tvs, (req, prov, body_ty))))
+           <- solveEqualities                             $
+                -- See Note [solveEqualities in tcPatSynSig]
               tcImplicitTKBndrs skol_info implicit_hs_tvs $
               tcExplicitTKBndrs skol_info univ_hs_tvs     $
               tcExplicitTKBndrs skol_info ex_hs_tvs       $
@@ -319,19 +339,19 @@ tcPatSynSig name sig_ty
                      -- e.g. pattern Zero <- 0#   (Trac #12094)
                  ; return (req, prov, body_ty) }
 
-       ; ungen_patsyn_ty <- zonkPromoteType $
-                            build_patsyn_type [] implicit_tvs univ_tvs req
-                                              ex_tvs prov body_ty
+       ; let ungen_patsyn_ty = build_patsyn_type [] implicit_tvs univ_tvs req
+                                                 ex_tvs prov body_ty
 
        -- Kind generalisation
        ; kvs <- kindGeneralize ungen_patsyn_ty
+       ; traceTc "tcPatSynSig" (ppr ungen_patsyn_ty)
 
        -- These are /signatures/ so we zonk to squeeze out any kind
        -- unification variables.  Do this after kindGeneralize which may
        -- default kind variables to *.
-       ; implicit_tvs <- mapM zonkTcTyCoVarBndr implicit_tvs
-       ; univ_tvs     <- mapM zonkTcTyCoVarBndr univ_tvs
-       ; ex_tvs       <- mapM zonkTcTyCoVarBndr ex_tvs
+       ; implicit_tvs <- mapM zonkTyCoVarKind implicit_tvs
+       ; univ_tvs     <- mapM zonkTyCoVarKind univ_tvs
+       ; ex_tvs       <- mapM zonkTyCoVarKind ex_tvs
        ; req          <- zonkTcTypes req
        ; prov         <- zonkTcTypes prov
        ; body_ty      <- zonkTcType  body_ty
@@ -402,7 +422,7 @@ tcInstSig :: TcIdSigInfo -> TcM TcIdSigInst
 -- Instantiate a type signature; only used with plan InferGen
 tcInstSig sig@(CompleteSig { sig_bndr = poly_id, sig_loc = loc })
   = setSrcSpan loc $  -- Set the binding site of the tyvars
-    do { (tv_prs, theta, tau) <- tcInstType newMetaSigTyVars poly_id
+    do { (tv_prs, theta, tau) <- tcInstType newMetaTyVarTyVars poly_id
               -- See Note [Pattern bindings and complete signatures]
 
        ; return (TISI { sig_inst_sig   = sig
@@ -447,8 +467,8 @@ tcInstSig sig@(PartialSig { psig_hs_ty = hs_ty
   where
     mk_sig_tv old_name kind
       = do { uniq <- newUnique
-           ; newSigTyVar (setNameUnique old_name uniq) kind }
-      -- Why newSigTyVar?  See TcBinds
+           ; newTyVarTyVar (setNameUnique old_name uniq) kind }
+      -- Why newTyVarTyVar?  See TcBinds
       -- Note [Quantified variables in partial type signatures]
 
 
@@ -462,8 +482,8 @@ Consider
 Here we'll infer a type from the pattern of 'T a', but if we feed in
 the signature types for f and g, we'll end up unifying 'a' and 'b'
 
-So we instantiate f and g's signature with SigTv skolems
-(newMetaSigTyVars) that can unify with each other.  If too much
+So we instantiate f and g's signature with TyVarTv skolems
+(newMetaTyVarTyVars) that can unify with each other.  If too much
 unification takes place, we'll find out when we do the final
 impedance-matching check in TcBinds.mkExport
 
@@ -493,7 +513,7 @@ extendPragEnv prag_fn (n, sig) = extendNameEnv_Acc (:) singleton prag_fn n sig
 ---------------
 mkPragEnv :: [LSig GhcRn] -> LHsBinds GhcRn -> TcPragEnv
 mkPragEnv sigs binds
-  = foldl extendPragEnv emptyNameEnv prs
+  = foldl' extendPragEnv emptyNameEnv prs
   where
     prs = mapMaybe get_sig sigs
 

@@ -805,7 +805,7 @@ mkConAppCode orig_d _ p con args_r_to_l =
 
             do_pushery !d (arg : args) = do
                 (push, arg_bytes) <- case arg of
-                    (Padding l _) -> pushPadding l
+                    (Padding l _) -> return $! pushPadding l
                     (FieldOff a _) -> pushConstrAtom d p (fromNonVoid a)
                 more_push_code <- do_pushery (d + arg_bytes) args
                 return (push `appOL` more_push_code)
@@ -996,8 +996,8 @@ doCase d s p (_,scrut) bndr alts is_unboxed_tuple
            | otherwise
            = DiscrP (fromIntegral (dataConTag dc - fIRST_TAG))
         my_discr (LitAlt l, _, _)
-           = case l of MachInt i     -> DiscrI (fromInteger i)
-                       MachWord w    -> DiscrW (fromInteger w)
+           = case l of LitNumber LitNumInt i  _  -> DiscrI (fromInteger i)
+                       LitNumber LitNumWord w _  -> DiscrW (fromInteger w)
                        MachFloat r   -> DiscrF (fromRational r)
                        MachDouble r  -> DiscrD (fromRational r)
                        MachChar i    -> DiscrI (ord i)
@@ -1233,7 +1233,7 @@ generateCCall d0 s p (CCallSpec target cconv safety) fn args_r_to_l
          push_r =
              if returns_void
                 then nilOL
-                else unitOL (PUSH_UBX (mkDummyLiteral r_rep) (trunc16W r_sizeW))
+                else unitOL (PUSH_UBX (mkDummyLiteral dflags r_rep) (trunc16W r_sizeW))
 
          -- generate the marshalling code we're going to call
 
@@ -1297,16 +1297,16 @@ primRepToFFIType dflags r
 
 -- Make a dummy literal, to be used as a placeholder for FFI return
 -- values on the stack.
-mkDummyLiteral :: PrimRep -> Literal
-mkDummyLiteral pr
+mkDummyLiteral :: DynFlags -> PrimRep -> Literal
+mkDummyLiteral dflags pr
    = case pr of
-        IntRep    -> MachInt 0
-        WordRep   -> MachWord 0
+        IntRep    -> mkMachInt dflags 0
+        WordRep   -> mkMachWord dflags 0
+        Int64Rep  -> mkMachInt64 0
+        Word64Rep -> mkMachWord64 0
         AddrRep   -> MachNullAddr
         DoubleRep -> MachDouble 0
         FloatRep  -> MachFloat 0
-        Int64Rep  -> MachInt64 0
-        Word64Rep -> MachWord64 0
         _         -> pprPanic "mkDummyLiteral" (ppr pr)
 
 
@@ -1505,11 +1505,11 @@ pushAtom d p (AnnVar var)
 
    | otherwise  -- var must be a global variable
    = do topStrings <- getTopStrings
+        dflags <- getDynFlags
         case lookupVarEnv topStrings var of
-            Just ptr -> pushAtom d p $ AnnLit $ MachWord $ fromIntegral $
-              ptrToWordPtr $ fromRemotePtr ptr
+            Just ptr -> pushAtom d p $ AnnLit $ mkMachWord dflags $
+              fromIntegral $ ptrToWordPtr $ fromRemotePtr ptr
             Nothing -> do
-                dflags <- getDynFlags
                 let sz = idSizeCon dflags var
                 MASSERT( sz == wordSize dflags )
                 return (unitOL (PUSH_G (getName var)), sz)
@@ -1524,19 +1524,22 @@ pushAtom _ _ (AnnLit lit) = do
 
      case lit of
         MachLabel _ _ _ -> code N
-        MachWord _    -> code N
-        MachInt _     -> code N
-        MachWord64 _  -> code L
-        MachInt64 _   -> code L
         MachFloat _   -> code F
         MachDouble _  -> code D
         MachChar _    -> code N
         MachNullAddr  -> code N
         MachStr _     -> code N
-        -- No LitInteger's should be left by the time this is called.
-        -- CorePrep should have converted them all to a real core
-        -- representation.
-        LitInteger {} -> panic "pushAtom: LitInteger"
+        LitNumber nt _ _ -> case nt of
+          LitNumInt     -> code N
+          LitNumWord    -> code N
+          LitNumInt64   -> code L
+          LitNumWord64  -> code L
+          -- No LitInteger's or LitNatural's should be left by the time this is
+          -- called. CorePrep should have converted them all to a real core
+          -- representation.
+          LitNumInteger -> panic "pushAtom: LitInteger"
+          LitNumNatural -> panic "pushAtom: LitNatural"
+        RubbishLit    -> code N
 
 pushAtom _ _ expr
    = pprPanic "ByteCodeGen.pushAtom"
@@ -1567,11 +1570,16 @@ pushConstrAtom d p (AnnVar v)
 
 pushConstrAtom d p expr = pushAtom d p expr
 
-pushPadding :: Int -> BcM (BCInstrList, ByteOff)
-pushPadding 1 = return (unitOL (PUSH_PAD8), 1)
-pushPadding 2 = return (unitOL (PUSH_PAD16), 2)
-pushPadding 4 = return (unitOL (PUSH_PAD32), 4)
-pushPadding x = panic $ "pushPadding x=" ++ show x
+pushPadding :: Int -> (BCInstrList, ByteOff)
+pushPadding !n = go n (nilOL, 0)
+  where
+    go n acc@(!instrs, !off) = case n of
+        0 -> acc
+        1 -> (instrs `mappend` unitOL PUSH_PAD8, off + 1)
+        2 -> (instrs `mappend` unitOL PUSH_PAD16, off + 2)
+        3 -> go 1 (go 2 acc)
+        4 -> (instrs `mappend` unitOL PUSH_PAD32, off + 4)
+        _ -> go (n - 4) (go 4 acc)
 
 -- -----------------------------------------------------------------------------
 -- Given a bunch of alts code and their discrs, do the donkey work

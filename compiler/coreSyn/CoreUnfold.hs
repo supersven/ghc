@@ -85,7 +85,7 @@ mkTopUnfolding dflags is_bottoming rhs
 mkImplicitUnfolding :: DynFlags -> CoreExpr -> Unfolding
 -- For implicit Ids, do a tiny bit of optimising first
 mkImplicitUnfolding dflags expr
-  = mkTopUnfolding dflags False (simpleOptExpr expr)
+  = mkTopUnfolding dflags False (simpleOptExpr dflags expr)
 
 -- Note [Top-level flag on inline rules]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -104,17 +104,17 @@ mkDFunUnfolding bndrs con ops
                   , df_args = map occurAnalyseExpr ops }
                   -- See Note [Occurrence analysis of unfoldings]
 
-mkWwInlineRule :: CoreExpr -> Arity -> Unfolding
-mkWwInlineRule expr arity
+mkWwInlineRule :: DynFlags -> CoreExpr -> Arity -> Unfolding
+mkWwInlineRule dflags expr arity
   = mkCoreUnfolding InlineStable True
-                   (simpleOptExpr expr)
+                   (simpleOptExpr dflags expr)
                    (UnfWhen { ug_arity = arity, ug_unsat_ok = unSaturatedOk
                             , ug_boring_ok = boringCxtNotOk })
 
 mkCompulsoryUnfolding :: CoreExpr -> Unfolding
 mkCompulsoryUnfolding expr         -- Used for things that absolutely must be unfolded
   = mkCoreUnfolding InlineCompulsory True
-                    (simpleOptExpr expr)
+                    (simpleOptExpr unsafeGlobalDynFlags expr)
                     (UnfWhen { ug_arity = 0    -- Arity of unfolding doesn't matter
                              , ug_unsat_ok = unSaturatedOk, ug_boring_ok = boringCxtOk })
 
@@ -126,7 +126,7 @@ mkWorkerUnfolding dflags work_fn
   | isStableSource src
   = mkCoreUnfolding src top_lvl new_tmpl guidance
   where
-    new_tmpl = simpleOptExpr (work_fn tmpl)
+    new_tmpl = simpleOptExpr dflags (work_fn tmpl)
     guidance = calcUnfoldingGuidance dflags False new_tmpl
 
 mkWorkerUnfolding _ _ _ = noUnfolding
@@ -141,7 +141,7 @@ mkInlineUnfolding expr
                     True         -- Note [Top-level flag on inline rules]
                     expr' guide
   where
-    expr' = simpleOptExpr expr
+    expr' = simpleOptExpr unsafeGlobalDynFlags expr
     guide = UnfWhen { ug_arity = manifestArity expr'
                     , ug_unsat_ok = unSaturatedOk
                     , ug_boring_ok = boring_ok }
@@ -155,24 +155,28 @@ mkInlineUnfoldingWithArity arity expr
                     True         -- Note [Top-level flag on inline rules]
                     expr' guide
   where
-    expr' = simpleOptExpr expr
+    expr' = simpleOptExpr unsafeGlobalDynFlags expr
     guide = UnfWhen { ug_arity = arity
                     , ug_unsat_ok = needSaturated
                     , ug_boring_ok = boring_ok }
-    boring_ok = inlineBoringOk expr'
+    -- See Note [INLINE pragmas and boring contexts] as to why we need to look
+    -- at the arity here.
+    boring_ok | arity == 0 = True
+              | otherwise  = inlineBoringOk expr'
 
 mkInlinableUnfolding :: DynFlags -> CoreExpr -> Unfolding
 mkInlinableUnfolding dflags expr
   = mkUnfolding dflags InlineStable False False expr'
   where
-    expr' = simpleOptExpr expr
+    expr' = simpleOptExpr dflags expr
 
-specUnfolding :: [Var] -> (CoreExpr -> CoreExpr) -> Arity -> Unfolding -> Unfolding
+specUnfolding :: DynFlags -> [Var] -> (CoreExpr -> CoreExpr) -> Arity
+              -> Unfolding -> Unfolding
 -- See Note [Specialising unfoldings]
 -- specUnfolding spec_bndrs spec_app arity_decrease unf
 --   = \spec_bndrs. spec_app( unf )
 --
-specUnfolding spec_bndrs spec_app arity_decrease
+specUnfolding dflags spec_bndrs spec_app arity_decrease
               df@(DFunUnfolding { df_bndrs = old_bndrs, df_con = con, df_args = args })
   = ASSERT2( arity_decrease == count isId old_bndrs - count isId spec_bndrs, ppr df )
     mkDFunUnfolding spec_bndrs con (map spec_arg args)
@@ -184,11 +188,11 @@ specUnfolding spec_bndrs spec_app arity_decrease
       --       \new_bndrs. MkD (spec_app(\old_bndrs. <op1>)) ... ditto <opn>
       -- The ASSERT checks the value part of that
   where
-    spec_arg arg = simpleOptExpr (spec_app (mkLams old_bndrs arg))
+    spec_arg arg = simpleOptExpr dflags (spec_app (mkLams old_bndrs arg))
                    -- The beta-redexes created by spec_app will be
                    -- simplified away by simplOptExpr
 
-specUnfolding spec_bndrs spec_app arity_decrease
+specUnfolding dflags spec_bndrs spec_app arity_decrease
               (CoreUnfolding { uf_src = src, uf_tmpl = tmpl
                              , uf_is_top = top_lvl
                              , uf_guidance = old_guidance })
@@ -199,13 +203,13 @@ specUnfolding spec_bndrs spec_app arity_decrease
  = let guidance = UnfWhen { ug_arity     = old_arity - arity_decrease
                           , ug_unsat_ok  = unsat_ok
                           , ug_boring_ok = boring_ok }
-       new_tmpl = simpleOptExpr (mkLams spec_bndrs (spec_app tmpl))
+       new_tmpl = simpleOptExpr dflags (mkLams spec_bndrs (spec_app tmpl))
                    -- The beta-redexes created by spec_app will be
                    -- simplified away by simplOptExpr
 
    in mkCoreUnfolding src top_lvl new_tmpl guidance
 
-specUnfolding _ _ _ _ = noUnfolding
+specUnfolding _ _ _ _ _ = noUnfolding
 
 {- Note [Specialising unfoldings]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -235,6 +239,72 @@ specUnfolding to specialise its unfolding.  Some important points:
         we keep it (so the specialised thing too will always inline)
      if a stable unfolding has UnfoldingGuidance of UnfIfGoodArgs
         (which arises from INLINABLE), we discard it
+
+Note [Honour INLINE on 0-ary bindings]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Consider
+
+   x = <expensive>
+   {-# INLINE x #-}
+
+   f y = ...x...
+
+The semantics of an INLINE pragma is
+
+  inline x at every call site, provided it is saturated;
+  that is, applied to at least as many arguments as appear
+  on the LHS of the Haskell source definition.
+
+(This soure-code-derived arity is stored in the `ug_arity` field of
+the `UnfoldingGuidance`.)
+
+In the example, x's ug_arity is 0, so we should inline it at every use
+site.  It's rare to have such an INLINE pragma (usually INLINE Is on
+functions), but it's occasionally very important (Trac #15578, #15519).
+In #15519 we had something like
+   x = case (g a b) of I# r -> T r
+   {-# INLINE x #-}
+   f y = ...(h x)....
+
+where h is strict.  So we got
+   f y = ...(case g a b of I# r -> h (T r))...
+
+and that in turn allowed SpecConstr to ramp up performance.
+
+How do we deliver on this?  By adjusting the ug_boring_ok
+flag in mkInlineUnfoldingWithArity; see
+Note [INLINE pragmas and boring contexts]
+
+NB: there is a real risk that full laziness will float it right back
+out again. Consider again
+  x = factorial 200
+  {-# INLINE x #-}
+  f y = ...x...
+
+After inlining we get
+  f y = ...(factorial 200)...
+
+but it's entirely possible that full laziness will do
+  lvl23 = factorial 200
+  f y = ...lvl23...
+
+That's a problem for another day.
+
+Note [INLINE pragmas and boring contexts]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+An INLINE pragma uses mkInlineUnfoldingWithArity to build the
+unfolding.  That sets the ug_boring_ok flag to False if the function
+is not tiny (inlineBorkingOK), so that even INLINE functions are not
+inlined in an utterly boring context.  E.g.
+     \x y. Just (f y x)
+Nothing is gained by inlining f here, even if it has an INLINE
+pragma.
+
+But for 0-ary bindings, we want to inline regardless; see
+Note [Honour INLINE on 0-ary bindings].
+
+I'm a bit worried that it's possible for the same kind of problem
+to arise for non-0-ary functions too, but let's wait and see.
 -}
 
 mkCoreUnfolding :: UnfoldingSource -> Bool -> CoreExpr
@@ -700,7 +770,8 @@ sizeExpr dflags bOMB_OUT_SIZE top_args expr
 -- | Finds a nominal size of a string literal.
 litSize :: Literal -> Int
 -- Used by CoreUnfold.sizeExpr
-litSize (LitInteger {}) = 100   -- Note [Size of literal integers]
+litSize (LitNumber LitNumInteger _ _) = 100   -- Note [Size of literal integers]
+litSize (LitNumber LitNumNatural _ _) = 100
 litSize (MachStr str)   = 10 + 10 * ((BS.length str + 3) `div` 4)
         -- If size could be 0 then @f "x"@ might be too small
         -- [Sept03: make literal strings a bit bigger to avoid fruitless
@@ -1447,6 +1518,8 @@ This kind of thing can occur if you have
         foo = let x = e in (x,x)
 
 which Roman did.
+
+
 -}
 
 computeDiscount :: DynFlags -> [Int] -> Int -> [ArgSummary] -> CallCtxt

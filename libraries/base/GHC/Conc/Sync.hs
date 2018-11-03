@@ -74,8 +74,6 @@ module GHC.Conc.Sync
         , orElse
         , throwSTM
         , catchSTM
-        , alwaysSucceeds
-        , always
         , TVar(..)
         , newTVar
         , newTVarIO
@@ -545,8 +543,8 @@ data BlockReason
         -- ^currently in a foreign call
   | BlockedOnOther
         -- ^blocked on some other resource.  Without @-threaded@,
-        -- I\/O and 'threadDelay' show up as 'BlockedOnOther', with @-threaded@
-        -- they show up as 'BlockedOnMVar'.
+        -- I\/O and 'Control.Concurrent.threadDelay' show up as
+        -- 'BlockedOnOther', with @-threaded@ they show up as 'BlockedOnMVar'.
   deriving ( Eq   -- ^ @since 4.3.0.0
            , Ord  -- ^ @since 4.3.0.0
            , Show -- ^ @since 4.3.0.0
@@ -722,8 +720,11 @@ unsafeIOToSTM (IO m) = STM m
 --
 -- However, there are functions for creating transactional variables that
 -- can always be safely called in 'unsafePerformIO'. See: 'newTVarIO',
--- 'newTChanIO', 'newBroadcastTChanIO', 'newTQueueIO', 'newTBQueueIO',
--- and 'newTMVarIO'.
+-- 'Control.Concurrent.STM.TChan.newTChanIO',
+-- 'Control.Concurrent.STM.TChan.newBroadcastTChanIO',
+-- 'Control.Concurrent.STM.TQueue.newTQueueIO',
+-- 'Control.Concurrent.STM.TBQueue.newTBQueueIO', and
+-- 'Control.Concurrent.STM.TMVar.newTMVarIO'.
 --
 -- Using 'unsafePerformIO' inside of 'atomically' is also dangerous but for
 -- different reasons. See 'unsafeIOToSTM' for more on this.
@@ -751,7 +752,12 @@ orElse (STM m) e = STM $ \s -> catchRetry# m (unSTM e) s
 -- | A variant of 'throw' that can only be used within the 'STM' monad.
 --
 -- Throwing an exception in @STM@ aborts the transaction and propagates the
--- exception.
+-- exception. If the exception is caught via 'catchSTM', only the changes
+-- enclosed by the catch are rolled back; changes made outside of 'catchSTM'
+-- persist.
+--
+-- If the exception is not caught inside of the 'STM', it is re-thrown by
+-- 'atomically', and the entire 'STM' is rolled back.
 --
 -- Although 'throwSTM' has a type that is an instance of the type of 'throw', the
 -- two functions are subtly different:
@@ -769,50 +775,18 @@ orElse (STM m) e = STM $ \s -> catchRetry# m (unSTM e) s
 throwSTM :: Exception e => e -> STM a
 throwSTM e = STM $ raiseIO# (toException e)
 
--- |Exception handling within STM actions.
+-- | Exception handling within STM actions.
+--
+-- @'catchSTM' m f@ catches any exception thrown by @m@ using 'throwSTM',
+-- using the function @f@ to handle the exception. If an exception is
+-- thrown, any changes made by @m@ are rolled back, but changes prior to
+-- @m@ persist.
 catchSTM :: Exception e => STM a -> (e -> STM a) -> STM a
 catchSTM (STM m) handler = STM $ catchSTM# m handler'
     where
       handler' e = case fromException e of
                      Just e' -> unSTM (handler e')
                      Nothing -> raiseIO# e
-
--- Invariant checking has been removed. See #14324 and
--- https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0011-deprecate-stm-invariants.rst
-{-# DEPRECATED checkInv, always, alwaysSucceeds
-    [ "The STM invariant-checking mechanism is deprecated in GHC 8.4"
-    , "and will be removed in GHC 8.10. See "
-    , "<https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0011-deprecate-stm-invariants.rst>."
-    , ""
-    , "Existing users are encouraged to encapsulate their STM"
-    , "operations in safe abstractions which can perform the invariant"
-    , "checking without help from the runtime system."
-    ] #-}
-
--- | Low-level primitive on which 'always' and 'alwaysSucceeds' are built.
--- 'checkInv' differs from these in that,
---
--- 1. the invariant is not checked when 'checkInv' is called, only at the end of
--- this and subsequent transactions
--- 2. the invariant failure is indicated by raising an exception.
-checkInv :: STM a -> STM ()
-checkInv (STM m) = STM (\s -> case (check# m) s of s' -> (# s', () #))
-
--- | 'alwaysSucceeds' adds a new invariant that must be true when passed
--- to 'alwaysSucceeds', at the end of the current transaction, and at
--- the end of every subsequent transaction.  If it fails at any
--- of those points then the transaction violating it is aborted
--- and the exception raised by the invariant is propagated.
-alwaysSucceeds :: STM a -> STM ()
-alwaysSucceeds i = do ( i >> retry ) `orElse` ( return () )
-                      checkInv i
-
--- | 'always' is a variant of 'alwaysSucceeds' in which the invariant is
--- expressed as an @STM Bool@ action that must return @True@.  Returning
--- @False@ or raising an exception are both treated as invariant failures.
-always :: STM Bool -> STM ()
-always i = alwaysSucceeds ( do v <- i
-                               if (v) then return () else ( errorWithoutStackTrace "Transactional invariant violation" ) )
 
 -- |Shared memory locations that support atomic memory transactions.
 data TVar a = TVar (TVar# RealWorld a)

@@ -102,7 +102,7 @@ checkStackFrame( StgPtr c )
 
     case UPDATE_FRAME:
       ASSERT(LOOKS_LIKE_CLOSURE_PTR(((StgUpdateFrame*)c)->updatee));
-    /* fallthrough */
+      FALLTHROUGH;
     case ATOMICALLY_FRAME:
     case CATCH_RETRY_FRAME:
     case CATCH_STM_FRAME:
@@ -292,8 +292,12 @@ checkClosure( const StgClosure* p )
         ASSERT(LOOKS_LIKE_CLOSURE_PTR(bq->bh));
 
         ASSERT(get_itbl((StgClosure *)(bq->owner))->type == TSO);
-        ASSERT(bq->queue == (MessageBlackHole*)END_TSO_QUEUE
-               || bq->queue->header.info == &stg_MSG_BLACKHOLE_info);
+        ASSERT(// A bq with no other blocked TSOs:
+               bq->queue == (MessageBlackHole*)END_TSO_QUEUE ||
+               // A bq with blocked TSOs in its queue:
+               bq->queue->header.info == &stg_MSG_BLACKHOLE_info ||
+               // A bq with a deleted (in throwToMsg()) MSG_BLACKHOLE:
+               bq->queue->header.info == &stg_IND_info);
         ASSERT(bq->link == (StgBlockingQueue*)END_TSO_QUEUE ||
                get_itbl((StgClosure *)(bq->link))->type == IND ||
                get_itbl((StgClosure *)(bq->link))->type == BLOCKING_QUEUE);
@@ -380,8 +384,8 @@ checkClosure( const StgClosure* p )
 
     case MUT_ARR_PTRS_CLEAN:
     case MUT_ARR_PTRS_DIRTY:
-    case MUT_ARR_PTRS_FROZEN:
-    case MUT_ARR_PTRS_FROZEN0:
+    case MUT_ARR_PTRS_FROZEN_CLEAN:
+    case MUT_ARR_PTRS_FROZEN_DIRTY:
         {
             StgMutArrPtrs* a = (StgMutArrPtrs *)p;
             uint32_t i;
@@ -389,6 +393,18 @@ checkClosure( const StgClosure* p )
                 ASSERT(LOOKS_LIKE_CLOSURE_PTR(a->payload[i]));
             }
             return mut_arr_ptrs_sizeW(a);
+        }
+
+    case SMALL_MUT_ARR_PTRS_CLEAN:
+    case SMALL_MUT_ARR_PTRS_DIRTY:
+    case SMALL_MUT_ARR_PTRS_FROZEN_CLEAN:
+    case SMALL_MUT_ARR_PTRS_FROZEN_DIRTY:
+        {
+            StgSmallMutArrPtrs *a = (StgSmallMutArrPtrs *)p;
+            for (uint32_t i = 0; i < a->ptrs; i++) {
+                ASSERT(LOOKS_LIKE_CLOSURE_PTR(a->payload[i]));
+            }
+            return small_mut_arr_ptrs_sizeW(a);
         }
 
     case TSO:
@@ -535,7 +551,8 @@ checkTSO(StgTSO *tso)
     ASSERT(next == END_TSO_QUEUE ||
            info == &stg_MVAR_TSO_QUEUE_info ||
            info == &stg_TSO_info ||
-           info == &stg_WHITEHOLE_info); // happens due to STM doing lockTSO()
+           info == &stg_WHITEHOLE_info); // used to happen due to STM doing
+                                         // lockTSO(), might not happen now
 
     if (   tso->why_blocked == BlockedOnMVar
         || tso->why_blocked == BlockedOnMVarRead
@@ -677,7 +694,7 @@ checkStaticObjects ( StgClosure* static_objects )
       break;
 
     case FUN_STATIC:
-      p = *FUN_STATIC_LINK((StgClosure *)p);
+      p = *STATIC_LINK(info,(StgClosure *)p);
       break;
 
     case CONSTR:

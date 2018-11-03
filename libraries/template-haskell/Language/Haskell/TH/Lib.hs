@@ -21,7 +21,7 @@ module Language.Haskell.TH.Lib (
         StmtQ, RangeQ, SourceStrictnessQ, SourceUnpackednessQ, BangQ,
         BangTypeQ, VarBangTypeQ, StrictTypeQ, VarStrictTypeQ, FieldExpQ, PatQ,
         FieldPatQ, RuleBndrQ, TySynEqnQ, PatSynDirQ, PatSynArgsQ,
-        FamilyResultSigQ,
+        FamilyResultSigQ, DerivStrategyQ,
 
     -- ** Constructors lifted to 'Q'
     -- *** Literals
@@ -37,8 +37,8 @@ module Language.Haskell.TH.Lib (
         normalB, guardedB, normalG, normalGE, patG, patGE, match, clause,
 
     -- *** Expressions
-        dyn, varE, unboundVarE, labelE,  conE, litE, appE, appTypeE, uInfixE, parensE,
-        staticE, infixE, infixApp, sectionL, sectionR,
+        dyn, varE, unboundVarE, labelE, implicitParamVarE, conE, litE, staticE,
+        appE, appTypeE, uInfixE, parensE, infixE, infixApp, sectionL, sectionR,
         lamE, lam1E, lamCaseE, tupE, unboxedTupE, unboxedSumE, condE, multiIfE,
         letE, caseE, appsE, listE, sigE, recConE, recUpdE, stringE, fieldExp,
     -- **** Ranges
@@ -48,13 +48,13 @@ module Language.Haskell.TH.Lib (
     arithSeqE,
     fromR, fromThenR, fromToR, fromThenToR,
     -- **** Statements
-    doE, compE,
-    bindS, letS, noBindS, parS,
+    doE, mdoE, compE,
+    bindS, letS, noBindS, parS, recS,
 
     -- *** Types
         forallT, varT, conT, appT, arrowT, infixT, uInfixT, parensT, equalityT,
         listT, tupleT, unboxedTupleT, unboxedSumT, sigT, litT, wildCardT,
-        promotedT, promotedTupleT, promotedNilT, promotedConsT,
+        promotedT, promotedTupleT, promotedNilT, promotedConsT, implicitParamT,
     -- **** Type literals
     numTyLit, strTyLit,
     -- **** Strictness
@@ -79,7 +79,9 @@ module Language.Haskell.TH.Lib (
     -- *** Top Level Declarations
     -- **** Data
     valD, funD, tySynD, dataD, newtypeD,
-    derivClause, DerivClause(..), DerivStrategy(..),
+    derivClause, DerivClause(..),
+    stockStrategy, anyclassStrategy, newtypeStrategy,
+    viaStrategy, DerivStrategy(..),
     -- **** Class
     classD, instanceD, instanceWithOverlapD, Overlap(..),
     sigD, standaloneDerivD, standaloneDerivWithStrategyD, defaultSigD,
@@ -111,6 +113,9 @@ module Language.Haskell.TH.Lib (
     patSynD, patSynSigD, unidir, implBidir, explBidir, prefixPatSyn,
     infixPatSyn, recordPatSyn,
 
+    -- **** Implicit Parameters
+    implicitParamBindD,
+
     -- ** Reify
     thisModule
 
@@ -121,11 +126,13 @@ import Language.Haskell.TH.Lib.Internal hiding
   , dataD
   , newtypeD
   , classD
+  , pragRuleD
   , dataInstD
   , newtypeInstD
   , dataFamilyD
   , openTypeFamilyD
   , closedTypeFamilyD
+  , tySynEqn
   , forallC
 
   , forallT
@@ -140,12 +147,16 @@ import Language.Haskell.TH.Lib.Internal hiding
   , kindSig
   , tyVarSig
 
+  , derivClause
+  , standaloneDerivWithStrategyD
+
   , Role
   , InjectivityAnn
   )
 import Language.Haskell.TH.Syntax
 
 import Control.Monad (liftM2)
+import Prelude
 
 -- All definitions below represent the "old" API, since their definitions are
 -- different in Language.Haskell.TH.Lib.Internal. Please think carefully before
@@ -183,6 +194,14 @@ classD ctxt cls tvs fds decs =
     ctxt1 <- ctxt
     return $ ClassD ctxt1 cls tvs fds decs1
 
+pragRuleD :: String -> [RuleBndrQ] -> ExpQ -> ExpQ -> Phases -> DecQ
+pragRuleD n bndrs lhs rhs phases
+  = do
+      bndrs1 <- sequence bndrs
+      lhs1   <- lhs
+      rhs1   <- rhs
+      return $ PragmaD $ RuleP n Nothing bndrs1 lhs1 rhs1 phases
+
 dataInstD :: CxtQ -> Name -> [TypeQ] -> Maybe Kind -> [ConQ] -> [DerivClauseQ]
           -> DecQ
 dataInstD ctxt tc tys ksig cons derivs =
@@ -191,7 +210,7 @@ dataInstD ctxt tc tys ksig cons derivs =
     tys1  <- sequence tys
     cons1 <- sequence cons
     derivs1 <- sequence derivs
-    return (DataInstD ctxt1 tc tys1 ksig cons1 derivs1)
+    return (DataInstD ctxt1 tc Nothing tys1 ksig cons1 derivs1)
 
 newtypeInstD :: CxtQ -> Name -> [TypeQ] -> Maybe Kind -> ConQ -> [DerivClauseQ]
              -> DecQ
@@ -201,7 +220,7 @@ newtypeInstD ctxt tc tys ksig con derivs =
     tys1  <- sequence tys
     con1  <- con
     derivs1 <- sequence derivs
-    return (NewtypeInstD ctxt1 tc tys1 ksig con1 derivs1)
+    return (NewtypeInstD ctxt1 tc Nothing tys1 ksig con1 derivs1)
 
 dataFamilyD :: Name -> [TyVarBndr] -> Maybe Kind -> DecQ
 dataFamilyD tc tvs kind
@@ -217,6 +236,13 @@ closedTypeFamilyD :: Name -> [TyVarBndr] -> FamilyResultSig
 closedTypeFamilyD tc tvs result injectivity eqns =
   do eqns1 <- sequence eqns
      return (ClosedTypeFamilyD (TypeFamilyHead tc tvs result injectivity) eqns1)
+
+tySynEqn :: [TypeQ] -> TypeQ -> TySynEqnQ
+tySynEqn lhs rhs =
+  do
+    lhs1 <- sequence lhs
+    rhs1 <- rhs
+    return (TySynEqn Nothing lhs1 rhs1)
 
 forallC :: [TyVarBndr] -> CxtQ -> ConQ -> ConQ
 forallC ns ctxt con = liftM2 (ForallC ns) ctxt con
@@ -262,3 +288,17 @@ kindSig = KindSig
 
 tyVarSig :: TyVarBndr -> FamilyResultSig
 tyVarSig = TyVarSig
+
+-------------------------------------------------------------------------------
+-- * Top Level Declarations
+
+derivClause :: Maybe DerivStrategy -> [PredQ] -> DerivClauseQ
+derivClause mds p = do
+  p' <- cxt p
+  return $ DerivClause mds p'
+
+standaloneDerivWithStrategyD :: Maybe DerivStrategy -> CxtQ -> TypeQ -> DecQ
+standaloneDerivWithStrategyD mds ctxt ty = do
+  ctxt' <- ctxt
+  ty'   <- ty
+  return $ StandaloneDerivD mds ctxt' ty'

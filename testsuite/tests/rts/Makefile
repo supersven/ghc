@@ -64,7 +64,7 @@ T9405:
 
 define run_T5435_v
 $(RM) T5435_load_v_$(1) T5435_v_$(1)$(exeext)
-'$(TEST_HC)' $(TEST_HC_OPTS) -optc-D$(HostOS)_HOST_OS -v0 -c T5435_$(1).c -o T5435_load_v_$(1).o
+'$(TEST_HC)' $(TEST_HC_OPTS) -optc-D$(HostOS)_HOST_OS -optc-DLOAD_CONSTR=$(2) -v0 -c T5435_$(1).c -o T5435_load_v_$(1).o
 '$(TEST_HC)' $(TEST_HC_OPTS) -v0 T5435.hs -osuf main_v_$(1)_o -o T5435_v_$(1)$(exeext)
 ./T5435_v_$(1) v ./T5435_load_v_$(1).o
 endef
@@ -78,11 +78,13 @@ endef
 
 .PHONY: T5435_v_gcc
 T5435_v_gcc :
-	$(call run_T5435_v,gcc)
+	$(call run_T5435_v,gcc,0)
 
-.PHONY: T5435_v_asm
-T5435_v_asm :
-	$(call run_T5435_v,asm)
+.PHONY: T5435_v_asm_a T5435_v_asm_b
+T5435_v_asm_a :
+	$(call run_T5435_v,asm,0)
+T5435_v_asm_b :
+	$(call run_T5435_v,asm,1)
 
 .PHONY: T5435_dyn_gcc
 T5435_dyn_gcc :
@@ -175,6 +177,11 @@ T11788:
 T12497:
 	echo main | "$(TEST_HC)" $(filter-out -rtsopts, $(TEST_HC_OPTS_INTERACTIVE)) T12497.hs
 
+.PHONY: T13617
+T13617:
+	"$(TEST_CC)"  -O3 -ffast-math -ftree-vectorize -c T13617.c -o T13617_sse.o
+	echo main | "$(TEST_HC)" $(TEST_HC_OPTS_INTERACTIVE) T13617.hs T13617_sse.o
+
 .PHONY: T14695
 T14695:
 	echo ":quit" | LD_LIBRARY_PATH="foo:" "$(TEST_HC)" $(filter-out -rtsopts, $(TEST_HC_OPTS_INTERACTIVE))
@@ -183,3 +190,25 @@ T14695:
 InternalCounters:
 	"$(TEST_HC)" +RTS -s --internal-counters -RTS 2>&1 | grep "Internal Counters"
 	-"$(TEST_HC)" +RTS -s -RTS 2>&1 | grep "Internal Counters"
+
+.PHONY: KeepCafsFail
+KeepCafsFail:
+	"$(TEST_HC)" -c -g -v0 KeepCafsBase.hs KeepCafs1.hs KeepCafs2.hs
+	"$(TEST_HC)" -g -v0 KeepCafsMain.hs KeepCafsBase.o -debug -rdynamic -fwhole-archive-hs-libs $(KEEPCAFS)
+	./KeepCafsMain 2>&1 || echo "exit($$?)"
+
+.PHONY: KeepCafs
+KeepCafs:
+	"${MAKE}" KeepCafsFail KEEPCAFS=-fkeep-cafs
+
+.PHONY: EventlogOutput1
+EventlogOutput1:
+	"$(TEST_HC)" -eventlog -v0 EventlogOutput.hs
+	./EventlogOutput +RTS -l -olhello.eventlog
+	ls hello.eventlog >/dev/null
+
+.PHONY: EventlogOutput2
+EventlogOutput2:
+	"$(TEST_HC)" -eventlog -v0 EventlogOutput.hs
+	./EventlogOutput +RTS -l
+	ls EventlogOutput.eventlog >/dev/null

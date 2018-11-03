@@ -68,11 +68,11 @@ module Lexer (
    explicitNamespacesEnabled,
    patternSynonymsEnabled,
    sccProfilingOn, hpcEnabled,
+   starIsTypeEnabled,
    addWarning,
    lexTokenStream,
    addAnnotation,AddAnn,addAnnsAt,mkParensApiAnn,
-   commentToAnnotation,
-   moveAnnotations
+   commentToAnnotation
   ) where
 
 import GhcPrelude
@@ -311,15 +311,18 @@ $tab          { warnTab }
 
 -- single-line line pragmas, of the form
 --    # <line> "<file>" <extra-stuff> \n
-<line_prag1> @decimal                   { setLine line_prag1a }
-<line_prag1a> \" [$graphic \ ]* \"      { setFile line_prag1b }
-<line_prag1b> .*                        { pop }
+<line_prag1> {
+  @decimal $white_no_nl+ \" [$graphic \ ]* \"  { setLineAndFile line_prag1a }
+  ()                                           { failLinePrag1 }
+}
+<line_prag1a> .*                               { popLinePrag1 }
 
 -- Haskell-style line pragmas, of the form
 --    {-# LINE <line> "<file>" #-}
-<line_prag2> @decimal                   { setLine line_prag2a }
-<line_prag2a> \" [$graphic \ ]* \"      { setFile line_prag2b }
-<line_prag2b> "#-}"|"-}"                { pop }
+<line_prag2> {
+  @decimal $white_no_nl+ \" [$graphic \ ]* \"  { setLineAndFile line_prag2a }
+}
+<line_prag2a> "#-}"|"-}"                       { pop }
    -- NOTE: accept -} at the end of a LINE pragma, for compatibility
    -- with older versions of GHC which generated these.
 
@@ -369,11 +372,6 @@ $tab          { warnTab }
 }
 
 -- "special" symbols
-
-<0> {
-  "[:" / { ifExtension parrEnabled }    { token ITopabrack }
-  ":]" / { ifExtension parrEnabled }    { token ITcpabrack }
-}
 
 <0> {
   "[|"        / { ifExtension thQuotesEnabled } { token (ITopenExpQuote NoE
@@ -637,6 +635,7 @@ data Token
   | ITstatic
   | ITstock
   | ITanyclass
+  | ITvia
 
   -- Backpack tokens
   | ITunit
@@ -665,15 +664,13 @@ data Token
   | IToptions_prag String
   | ITinclude_prag String
   | ITlanguage_prag
-  | ITvect_prag         SourceText
-  | ITvect_scalar_prag  SourceText
-  | ITnovect_prag       SourceText
   | ITminimal_prag      SourceText
   | IToverlappable_prag SourceText  -- instance overlap mode
   | IToverlapping_prag  SourceText  -- instance overlap mode
   | IToverlaps_prag     SourceText  -- instance overlap mode
   | ITincoherent_prag   SourceText  -- instance overlap mode
   | ITctype             SourceText
+  | ITcomment_line_prag         -- See Note [Nested comment line pragmas]
 
   | ITdotdot                    -- reserved symbols
   | ITcolon
@@ -686,10 +683,10 @@ data Token
   | ITrarrow            IsUnicodeSyntax
   | ITat
   | ITtilde
-  | ITtildehsh
   | ITdarrow            IsUnicodeSyntax
   | ITminus
   | ITbang
+  | ITstar              IsUnicodeSyntax
   | ITdot
 
   | ITbiglam                    -- GHC-extension symbols
@@ -838,6 +835,7 @@ reservedWordsFM = listToUFM $
          ( "static",         ITstatic,        0 ),
          ( "stock",          ITstock,         0 ),
          ( "anyclass",       ITanyclass,      0 ),
+         ( "via",            ITvia,           0 ),
          ( "group",          ITgroup,         xbit TransformComprehensionsBit),
          ( "by",             ITby,            xbit TransformComprehensionsBit),
          ( "using",          ITusing,         xbit TransformComprehensionsBit),
@@ -896,10 +894,11 @@ reservedSymsFM = listToUFM $
        ,("->",  ITrarrow NormalSyntax, always)
        ,("@",   ITat,                  always)
        ,("~",   ITtilde,               always)
-       ,("~#",  ITtildehsh,            magicHashEnabled)
        ,("=>",  ITdarrow NormalSyntax, always)
        ,("-",   ITminus,               always)
        ,("!",   ITbang,                always)
+
+       ,("*", ITstar NormalSyntax, starIsTypeEnabled)
 
         -- For 'forall a . t'
        ,(".", ITdot,  always) -- \i -> explicitForallEnabled i || inRulePrag i)
@@ -923,6 +922,8 @@ reservedSymsFM = listToUFM $
                                 \i -> unicodeSyntaxEnabled i && arrowsEnabled i)
        ,("⤜",   ITRarrowtail UnicodeSyntax,
                                 \i -> unicodeSyntaxEnabled i && arrowsEnabled i)
+       ,("★",   ITstar UnicodeSyntax,
+                  \i -> unicodeSyntaxEnabled i && starIsTypeEnabled i)
 
         -- ToDo: ideally, → and ∷ should be "specials", so that they cannot
         -- form part of a large operator.  This would let us have a better
@@ -962,6 +963,20 @@ begin code _span _str _len = do pushLexState code; lexToken
 pop :: Action
 pop _span _buf _len = do _ <- popLexState
                          lexToken
+-- See Note [Nested comment line pragmas]
+failLinePrag1 :: Action
+failLinePrag1 span _buf _len = do
+  b <- extension inNestedComment
+  if b then return (L span ITcomment_line_prag)
+       else lexError "lexical error in pragma"
+
+-- See Note [Nested comment line pragmas]
+popLinePrag1 :: Action
+popLinePrag1 span _buf _len = do
+  b <- extension inNestedComment
+  if b then return (L span ITcomment_line_prag) else do
+    _ <- popLexState
+    lexToken
 
 hopefully_open_brace :: Action
 hopefully_open_brace span buf len
@@ -1101,6 +1116,12 @@ nested_comment cont span buf len = do
         Nothing  -> errBrace input span
         Just ('-',input) -> go ('-':'\123':commentAcc) (n+1) input
         Just (_,_)       -> go ('\123':commentAcc) n input
+      -- See Note [Nested comment line pragmas]
+      Just ('\n',input) -> case alexGetChar' input of
+        Nothing  -> errBrace input span
+        Just ('#',_) -> do (parsedAcc,input) <- parseNestedPragma input
+                           go (parsedAcc ++ '\n':commentAcc) n input
+        Just (_,_)   -> go ('\n':commentAcc) n input
       Just (c,input) -> go (c:commentAcc) n input
 
 nested_doc_comment :: Action
@@ -1120,7 +1141,59 @@ nested_doc_comment span buf _len = withLexedDocType (go "")
           let cont = do input <- getInput; go commentAcc input docType False
           nested_comment cont span buf _len
         Just (_,_) -> go ('\123':commentAcc) input docType False
+      -- See Note [Nested comment line pragmas]
+      Just ('\n',input) -> case alexGetChar' input of
+        Nothing  -> errBrace input span
+        Just ('#',_) -> do (parsedAcc,input) <- parseNestedPragma input
+                           go (parsedAcc ++ '\n':commentAcc) input docType False
+        Just (_,_)   -> go ('\n':commentAcc) input docType False
       Just (c,input) -> go (c:commentAcc) input docType False
+
+-- See Note [Nested comment line pragmas]
+parseNestedPragma :: AlexInput -> P (String,AlexInput)
+parseNestedPragma input@(AI _ buf) = do
+  origInput <- getInput
+  setInput input
+  setExts (.|. xbit InNestedCommentBit)
+  pushLexState bol
+  lt <- lexToken
+  _ <- popLexState
+  setExts (.&. complement (xbit InNestedCommentBit))
+  postInput@(AI _ postBuf) <- getInput
+  setInput origInput
+  case unLoc lt of
+    ITcomment_line_prag -> do
+      let bytes = byteDiff buf postBuf
+          diff  = lexemeToString buf bytes
+      return (reverse diff, postInput)
+    lt' -> panic ("parseNestedPragma: unexpected token" ++ (show lt'))
+
+{-
+Note [Nested comment line pragmas]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+We used to ignore cpp-preprocessor-generated #line pragmas if they were inside
+nested comments.
+
+Now, when parsing a nested comment, if we encounter a line starting with '#' we
+call parseNestedPragma, which executes the following:
+1. Save the current lexer input (loc, buf) for later
+2. Set the current lexer input to the beginning of the line starting with '#'
+3. Turn the 'InNestedComment' extension on
+4. Push the 'bol' lexer state
+5. Lex a token. Due to (2), (3), and (4), this should always lex a single line
+   or less and return the ITcomment_line_prag token. This may set source line
+   and file location if a #line pragma is successfully parsed
+6. Restore lexer input and state to what they were before we did all this
+7. Return control to the function parsing a nested comment, informing it of
+   what the lexer parsed
+
+Regarding (5) above:
+Every exit from the 'bol' lexer state (do_bol, popLinePrag1, failLinePrag1)
+checks if the 'InNestedComment' extension is set. If it is, that function will
+return control to parseNestedPragma by returning the ITcomment_line_prag token.
+
+See #314 for more background on the bug this fixes.
+-}
 
 withLexedDocType :: (AlexInput -> (String -> Token) -> Bool -> P (RealLocated Token))
                  -> P (RealLocated Token)
@@ -1375,20 +1448,23 @@ readHexFractionalLit str =
 -- we're at the first token on a line, insert layout tokens if necessary
 do_bol :: Action
 do_bol span _str _len = do
-        (pos, gen_semic) <- getOffside
-        case pos of
-            LT -> do
-                --trace "layout: inserting '}'" $ do
-                popContext
-                -- do NOT pop the lex state, we might have a ';' to insert
-                return (L span ITvccurly)
-            EQ | gen_semic -> do
-                --trace "layout: inserting ';'" $ do
-                _ <- popLexState
-                return (L span ITsemi)
-            _ -> do
-                _ <- popLexState
-                lexToken
+        -- See Note [Nested comment line pragmas]
+        b <- extension inNestedComment
+        if b then return (L span ITcomment_line_prag) else do
+          (pos, gen_semic) <- getOffside
+          case pos of
+              LT -> do
+                  --trace "layout: inserting '}'" $ do
+                  popContext
+                  -- do NOT pop the lex state, we might have a ';' to insert
+                  return (L span ITvccurly)
+              EQ | gen_semic -> do
+                  --trace "layout: inserting ';'" $ do
+                  _ <- popLexState
+                  return (L span ITsemi)
+              _ -> do
+                  _ <- popLexState
+                  lexToken
 
 -- certain keywords put us in the "layout" state, where we might
 -- add an opening curly brace.
@@ -1448,29 +1524,13 @@ do_layout_left span _buf _len = do
 -- -----------------------------------------------------------------------------
 -- LINE pragmas
 
-setLine :: Int -> Action
-setLine code span buf len = do
-  let line = parseUnsignedInteger buf len 10 octDecDigit
-  setSrcLoc (mkRealSrcLoc (srcSpanFile span) (fromIntegral line - 1) 1)
-        -- subtract one: the line number refers to the *following* line
-  _ <- popLexState
-  pushLexState code
-  lexToken
-
-setColumn :: Action
-setColumn span buf len = do
-  let column =
-        case reads (lexemeToString buf len) of
-          [(column, _)] -> column
-          _ -> error "setColumn: expected integer" -- shouldn't happen
-  setSrcLoc (mkRealSrcLoc (srcSpanFile span) (srcSpanEndLine span)
-                          (fromIntegral (column :: Integer)))
-  _ <- popLexState
-  lexToken
-
-setFile :: Int -> Action
-setFile code span buf len = do
-  let file = mkFastString (go (lexemeToString (stepOn buf) (len-2)))
+setLineAndFile :: Int -> Action
+setLineAndFile code span buf len = do
+  let src = lexemeToString buf (len - 1)  -- drop trailing quotation mark
+      linenumLen = length $ head $ words src
+      linenum = parseUnsignedInteger buf linenumLen 10 octDecDigit
+      file = mkFastString $ go $ drop 1 $ dropWhile (/= '"') src
+          -- skip everything through first quotation mark to get to the filename
         where go ('\\':c:cs) = c : go cs
               go (c:cs)      = c : go cs
               go []          = []
@@ -1484,10 +1544,22 @@ setFile code span buf len = do
               -- filenames and it does not remove duplicate
               -- backslashes after the drive letter (should it?).
   setAlrLastLoc $ alrInitialLoc file
-  setSrcLoc (mkRealSrcLoc file (srcSpanEndLine span) (srcSpanEndCol span))
+  setSrcLoc (mkRealSrcLoc file (fromIntegral linenum - 1) (srcSpanEndCol span))
+      -- subtract one: the line number refers to the *following* line
   addSrcFile file
   _ <- popLexState
   pushLexState code
+  lexToken
+
+setColumn :: Action
+setColumn span buf len = do
+  let column =
+        case reads (lexemeToString buf len) of
+          [(column, _)] -> column
+          _ -> error "setColumn: expected integer" -- shouldn't happen
+  setSrcLoc (mkRealSrcLoc (srcSpanFile span) (srcSpanEndLine span)
+                          (fromIntegral (column :: Integer)))
+  _ <- popLexState
   lexToken
 
 alrInitialLoc :: FastString -> RealSrcSpan
@@ -2230,7 +2302,6 @@ data ExtBits
   = FfiBit
   | InterruptibleFfiBit
   | CApiFfiBit
-  | ParrBit
   | ArrowsBit
   | ThBit
   | ThQuotesBit
@@ -2250,6 +2321,7 @@ data ExtBits
   | TransformComprehensionsBit
   | QqBit -- enable quasiquoting
   | InRulePragBit
+  | InNestedCommentBit -- See Note [Nested comment line pragmas]
   | RawTokenStreamBit -- producing a token stream with all comments included
   | SccProfilingOnBit
   | HpcBit
@@ -2266,13 +2338,12 @@ data ExtBits
   | TypeApplicationsBit
   | StaticPointersBit
   | NumericUnderscoresBit
+  | StarIsTypeBit
   deriving Enum
 
 
 always :: ExtsBitmap -> Bool
 always           _     = True
-parrEnabled :: ExtsBitmap -> Bool
-parrEnabled = xtest ParrBit
 arrowsEnabled :: ExtsBitmap -> Bool
 arrowsEnabled = xtest ArrowsBit
 thEnabled :: ExtsBitmap -> Bool
@@ -2303,6 +2374,8 @@ qqEnabled :: ExtsBitmap -> Bool
 qqEnabled = xtest QqBit
 inRulePrag :: ExtsBitmap -> Bool
 inRulePrag = xtest InRulePragBit
+inNestedComment :: ExtsBitmap -> Bool
+inNestedComment = xtest InNestedCommentBit
 rawTokenStreamEnabled :: ExtsBitmap -> Bool
 rawTokenStreamEnabled = xtest RawTokenStreamBit
 alternativeLayoutRule :: ExtsBitmap -> Bool
@@ -2336,6 +2409,8 @@ staticPointersEnabled :: ExtsBitmap -> Bool
 staticPointersEnabled = xtest StaticPointersBit
 numericUnderscoresEnabled :: ExtsBitmap -> Bool
 numericUnderscoresEnabled = xtest NumericUnderscoresBit
+starIsTypeEnabled :: ExtsBitmap -> Bool
+starIsTypeEnabled = xtest StarIsTypeBit
 
 -- PState for parsing options pragmas
 --
@@ -2354,48 +2429,55 @@ mkParserFlags flags =
     , pExtsBitmap = bitmap
     }
   where
-      bitmap =     FfiBit                      `setBitIf` xopt LangExt.ForeignFunctionInterface flags
-               .|. InterruptibleFfiBit         `setBitIf` xopt LangExt.InterruptibleFFI         flags
-               .|. CApiFfiBit                  `setBitIf` xopt LangExt.CApiFFI                  flags
-               .|. ParrBit                     `setBitIf` xopt LangExt.ParallelArrays           flags
-               .|. ArrowsBit                   `setBitIf` xopt LangExt.Arrows                   flags
-               .|. ThBit                       `setBitIf` xopt LangExt.TemplateHaskell          flags
-               .|. ThQuotesBit                 `setBitIf` xopt LangExt.TemplateHaskellQuotes    flags
-               .|. QqBit                       `setBitIf` xopt LangExt.QuasiQuotes              flags
-               .|. IpBit                       `setBitIf` xopt LangExt.ImplicitParams           flags
-               .|. OverloadedLabelsBit         `setBitIf` xopt LangExt.OverloadedLabels         flags
-               .|. ExplicitForallBit           `setBitIf` xopt LangExt.ExplicitForAll           flags
-               .|. BangPatBit                  `setBitIf` xopt LangExt.BangPatterns             flags
-               .|. HaddockBit                  `setBitIf` gopt Opt_Haddock                      flags
-               .|. MagicHashBit                `setBitIf` xopt LangExt.MagicHash                flags
-               .|. RecursiveDoBit              `setBitIf` xopt LangExt.RecursiveDo              flags
-               .|. UnicodeSyntaxBit            `setBitIf` xopt LangExt.UnicodeSyntax            flags
-               .|. UnboxedTuplesBit            `setBitIf` xopt LangExt.UnboxedTuples            flags
-               .|. UnboxedSumsBit              `setBitIf` xopt LangExt.UnboxedSums              flags
-               .|. DatatypeContextsBit         `setBitIf` xopt LangExt.DatatypeContexts         flags
-               .|. TransformComprehensionsBit  `setBitIf` xopt LangExt.TransformListComp        flags
-               .|. TransformComprehensionsBit  `setBitIf` xopt LangExt.MonadComprehensions      flags
-               .|. RawTokenStreamBit           `setBitIf` gopt Opt_KeepRawTokenStream           flags
-               .|. HpcBit                      `setBitIf` gopt Opt_Hpc                          flags
-               .|. AlternativeLayoutRuleBit    `setBitIf` xopt LangExt.AlternativeLayoutRule    flags
-               .|. RelaxedLayoutBit            `setBitIf` xopt LangExt.RelaxedLayout            flags
-               .|. SccProfilingOnBit           `setBitIf` gopt Opt_SccProfilingOn               flags
-               .|. NondecreasingIndentationBit `setBitIf` xopt LangExt.NondecreasingIndentation flags
-               .|. SafeHaskellBit              `setBitIf` safeImportsOn                         flags
-               .|. TraditionalRecordSyntaxBit  `setBitIf` xopt LangExt.TraditionalRecordSyntax  flags
-               .|. ExplicitNamespacesBit       `setBitIf` xopt LangExt.ExplicitNamespaces flags
-               .|. LambdaCaseBit               `setBitIf` xopt LangExt.LambdaCase               flags
-               .|. BinaryLiteralsBit           `setBitIf` xopt LangExt.BinaryLiterals           flags
-               .|. NegativeLiteralsBit         `setBitIf` xopt LangExt.NegativeLiterals         flags
-               .|. HexFloatLiteralsBit         `setBitIf` xopt LangExt.HexFloatLiterals         flags
-               .|. PatternSynonymsBit          `setBitIf` xopt LangExt.PatternSynonyms          flags
-               .|. TypeApplicationsBit         `setBitIf` xopt LangExt.TypeApplications         flags
-               .|. StaticPointersBit           `setBitIf` xopt LangExt.StaticPointers           flags
-               .|. NumericUnderscoresBit       `setBitIf` xopt LangExt.NumericUnderscores       flags
+    bitmap = safeHaskellBit .|. langExtBits .|. optBits
+    safeHaskellBit =
+          SafeHaskellBit `setBitIf` safeImportsOn flags
+    langExtBits =
+          FfiBit                      `xoptBit` LangExt.ForeignFunctionInterface
+      .|. InterruptibleFfiBit         `xoptBit` LangExt.InterruptibleFFI
+      .|. CApiFfiBit                  `xoptBit` LangExt.CApiFFI
+      .|. ArrowsBit                   `xoptBit` LangExt.Arrows
+      .|. ThBit                       `xoptBit` LangExt.TemplateHaskell
+      .|. ThQuotesBit                 `xoptBit` LangExt.TemplateHaskellQuotes
+      .|. QqBit                       `xoptBit` LangExt.QuasiQuotes
+      .|. IpBit                       `xoptBit` LangExt.ImplicitParams
+      .|. OverloadedLabelsBit         `xoptBit` LangExt.OverloadedLabels
+      .|. ExplicitForallBit           `xoptBit` LangExt.ExplicitForAll
+      .|. BangPatBit                  `xoptBit` LangExt.BangPatterns
+      .|. MagicHashBit                `xoptBit` LangExt.MagicHash
+      .|. RecursiveDoBit              `xoptBit` LangExt.RecursiveDo
+      .|. UnicodeSyntaxBit            `xoptBit` LangExt.UnicodeSyntax
+      .|. UnboxedTuplesBit            `xoptBit` LangExt.UnboxedTuples
+      .|. UnboxedSumsBit              `xoptBit` LangExt.UnboxedSums
+      .|. DatatypeContextsBit         `xoptBit` LangExt.DatatypeContexts
+      .|. TransformComprehensionsBit  `xoptBit` LangExt.TransformListComp
+      .|. TransformComprehensionsBit  `xoptBit` LangExt.MonadComprehensions
+      .|. AlternativeLayoutRuleBit    `xoptBit` LangExt.AlternativeLayoutRule
+      .|. RelaxedLayoutBit            `xoptBit` LangExt.RelaxedLayout
+      .|. NondecreasingIndentationBit `xoptBit` LangExt.NondecreasingIndentation
+      .|. TraditionalRecordSyntaxBit  `xoptBit` LangExt.TraditionalRecordSyntax
+      .|. ExplicitNamespacesBit       `xoptBit` LangExt.ExplicitNamespaces
+      .|. LambdaCaseBit               `xoptBit` LangExt.LambdaCase
+      .|. BinaryLiteralsBit           `xoptBit` LangExt.BinaryLiterals
+      .|. NegativeLiteralsBit         `xoptBit` LangExt.NegativeLiterals
+      .|. HexFloatLiteralsBit         `xoptBit` LangExt.HexFloatLiterals
+      .|. PatternSynonymsBit          `xoptBit` LangExt.PatternSynonyms
+      .|. TypeApplicationsBit         `xoptBit` LangExt.TypeApplications
+      .|. StaticPointersBit           `xoptBit` LangExt.StaticPointers
+      .|. NumericUnderscoresBit       `xoptBit` LangExt.NumericUnderscores
+      .|. StarIsTypeBit               `xoptBit` LangExt.StarIsType
+    optBits =
+          HaddockBit        `goptBit` Opt_Haddock
+      .|. RawTokenStreamBit `goptBit` Opt_KeepRawTokenStream
+      .|. HpcBit            `goptBit` Opt_Hpc
+      .|. SccProfilingOnBit `goptBit` Opt_SccProfilingOn
 
-      setBitIf :: ExtBits -> Bool -> ExtsBitmap
-      b `setBitIf` cond | cond      = xbit b
-                        | otherwise = 0
+    xoptBit bit ext = bit `setBitIf` xopt ext flags
+    goptBit bit opt = bit `setBitIf` gopt opt flags
+
+    setBitIf :: ExtBits -> Bool -> ExtsBitmap
+    b `setBitIf` cond | cond      = xbit b
+                      | otherwise = 0
 
 -- | Creates a parse state from a 'DynFlags' value
 mkPState :: DynFlags -> StringBuffer -> RealSrcLoc -> PState
@@ -2591,6 +2673,7 @@ lexTokenAlr = do mPending <- popPendingImplicitToken
                      ITwhere -> setAlrExpectingOCurly (Just ALRLayoutWhere)
                      ITlet   -> setAlrExpectingOCurly (Just ALRLayoutLet)
                      ITof    -> setAlrExpectingOCurly (Just ALRLayoutOf)
+                     ITlcase -> setAlrExpectingOCurly (Just ALRLayoutOf)
                      ITdo    -> setAlrExpectingOCurly (Just ALRLayoutDo)
                      ITmdo   -> setAlrExpectingOCurly (Just ALRLayoutDo)
                      ITrec   -> setAlrExpectingOCurly (Just ALRLayoutDo)
@@ -2878,8 +2961,6 @@ oneWordPrags = Map.fromList [
      ("unpack", strtoken (\s -> ITunpack_prag (SourceText s))),
      ("nounpack", strtoken (\s -> ITnounpack_prag (SourceText s))),
      ("ann", strtoken (\s -> ITann_prag (SourceText s))),
-     ("vectorize", strtoken (\s -> ITvect_prag (SourceText s))),
-     ("novectorize", strtoken (\s -> ITnovect_prag (SourceText s))),
      ("minimal", strtoken (\s -> ITminimal_prag (SourceText s))),
      ("overlaps", strtoken (\s -> IToverlaps_prag (SourceText s))),
      ("overlappable", strtoken (\s -> IToverlappable_prag (SourceText s))),
@@ -2890,7 +2971,7 @@ oneWordPrags = Map.fromList [
      ("column", columnPrag)
      ]
 
-twoWordPrags = Map.fromList([
+twoWordPrags = Map.fromList [
      ("inline conlike",
          strtoken (\s -> (ITinline_prag (SourceText s) Inline ConLike))),
      ("notinline conlike",
@@ -2898,9 +2979,8 @@ twoWordPrags = Map.fromList([
      ("specialize inline",
          strtoken (\s -> (ITspec_inline_prag (SourceText s) True))),
      ("specialize notinline",
-         strtoken (\s -> (ITspec_inline_prag (SourceText s) False))),
-     ("vectorize scalar",
-         strtoken (\s -> ITvect_scalar_prag (SourceText s)))])
+         strtoken (\s -> (ITspec_inline_prag (SourceText s) False)))
+     ]
 
 dispatch_pragmas :: Map String Action -> Action
 dispatch_pragmas prags span buf len = case Map.lookup (clean_pragma (lexemeToString buf len)) prags of
@@ -2922,8 +3002,6 @@ clean_pragma prag = canon_ws (map toLower (unprefix prag))
                           canonical prag' = case prag' of
                                               "noinline" -> "notinline"
                                               "specialise" -> "specialize"
-                                              "vectorise" -> "vectorize"
-                                              "novectorise" -> "novectorize"
                                               "constructorlike" -> "conlike"
                                               _ -> prag'
                           canon_ws s = unwords (map canonical (words s))
@@ -2990,23 +3068,6 @@ mkParensApiAnn s@(RealSrcSpan ss) = [mj AnnOpenP lo,mj AnnCloseP lc]
     ec = srcSpanEndCol ss
     lo = mkSrcSpan (srcSpanStart s)         (mkSrcLoc f sl (sc+1))
     lc = mkSrcSpan (mkSrcLoc f el (ec - 1)) (srcSpanEnd s)
-
--- | Move the annotations and comments belonging to the @old@ span to the @new@
---   one.
-moveAnnotations :: SrcSpan -> SrcSpan -> P ()
-moveAnnotations old new = P $ \s ->
-  let
-    updateAnn ((l,a),v)
-      | l == old = ((new,a),v)
-      | otherwise = ((l,a),v)
-    updateComment (l,c)
-      | l == old = (new,c)
-      | otherwise = (l,c)
-  in
-    POk s {
-       annotations = map updateAnn (annotations s)
-     , annotations_comments = map updateComment (annotations_comments s)
-     } ()
 
 queueComment :: Located Token -> P()
 queueComment c = P $ \s -> POk s {

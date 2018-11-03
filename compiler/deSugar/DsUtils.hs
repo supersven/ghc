@@ -37,7 +37,8 @@ module DsUtils (
         mkSelectorBinds,
 
         selectSimpleMatchVarL, selectMatchVars, selectMatchVar,
-        mkOptTickBox, mkBinaryTickBox, decideBangHood, addBang
+        mkOptTickBox, mkBinaryTickBox, decideBangHood, addBang,
+        isTrueLHsExpr
     ) where
 
 #include "HsVersions.h"
@@ -97,6 +98,7 @@ otherwise, make one up.
 -}
 
 selectSimpleMatchVarL :: LPat GhcTc -> DsM Id
+-- Postcondition: the returned Id has an Internal Name
 selectSimpleMatchVarL pat = selectMatchVar (unLoc pat)
 
 -- (selectMatchVars ps tys) chooses variables of type tys
@@ -116,9 +118,11 @@ selectSimpleMatchVarL pat = selectMatchVar (unLoc pat)
 -- And nowadays we won't, because the (x::Int) will be wrapped in a CoPat
 
 selectMatchVars :: [Pat GhcTc] -> DsM [Id]
+-- Postcondition: the returned Ids have Internal Names
 selectMatchVars ps = mapM selectMatchVar ps
 
 selectMatchVar :: Pat GhcTc -> DsM Id
+-- Postcondition: the returned Id has an Internal Name
 selectMatchVar (BangPat _ pat) = selectMatchVar (unLoc pat)
 selectMatchVar (LazyPat _ pat) = selectMatchVar (unLoc pat)
 selectMatchVar (ParPat _ pat)  = selectMatchVar (unLoc pat)
@@ -128,9 +132,8 @@ selectMatchVar (AsPat _ var _) = return (unLoc var)
 selectMatchVar other_pat       = newSysLocalDsNoLP (hsPatType other_pat)
                                   -- OK, better make up one...
 
-{-
-Note [Localise pattern binders]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+{- Note [Localise pattern binders]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Consider     module M where
                [Just a] = e
 After renaming it looks like
@@ -166,6 +169,7 @@ In fact, even CoreSubst.simplOptExpr will do this, and simpleOptExpr
 runs on the output of the desugarer, so all is well by the end of
 the desugaring pass.
 
+See also Note [MatchIds] in Match.hs
 
 ************************************************************************
 *                                                                      *
@@ -282,18 +286,15 @@ data CaseAlt a = MkCaseAlt{ alt_pat :: a,
                             alt_result :: MatchResult }
 
 mkCoAlgCaseMatchResult
-  :: DynFlags
-  -> Id                 -- Scrutinee
+  :: Id                 -- Scrutinee
   -> Type               -- Type of exp
   -> [CaseAlt DataCon]  -- Alternatives (bndrs *include* tyvars, dicts)
   -> MatchResult
-mkCoAlgCaseMatchResult dflags var ty match_alts
+mkCoAlgCaseMatchResult var ty match_alts
   | isNewtype  -- Newtype case; use a let
   = ASSERT( null (tail match_alts) && null (tail arg_ids1) )
     mkCoLetMatchResult (NonRec arg_id1 newtype_rhs) match_result1
 
-  | isPArrFakeAlts match_alts
-  = MatchResult CanFail $ mkPArrCase dflags var ty (sort_alts match_alts)
   | otherwise
   = mkDataConCase var ty match_alts
   where
@@ -310,34 +311,6 @@ mkCoAlgCaseMatchResult dflags var ty match_alts
     (tc, ty_args) = tcSplitTyConApp var_ty      -- Don't look through newtypes
                                                 -- (not that splitTyConApp does, these days)
     newtype_rhs = unwrapNewTypeBody tc ty_args (Var var)
-
-        --- Stuff for parallel arrays
-        --
-        -- Concerning `isPArrFakeAlts':
-        --
-        --  * it is *not* sufficient to just check the type of the type
-        --   constructor, as we have to be careful not to confuse the real
-        --   representation of parallel arrays with the fake constructors;
-        --   moreover, a list of alternatives must not mix fake and real
-        --   constructors (this is checked earlier on)
-        --
-        -- FIXME: We actually go through the whole list and make sure that
-        --        either all or none of the constructors are fake parallel
-        --        array constructors.  This is to spot equations that mix fake
-        --        constructors with the real representation defined in
-        --        `PrelPArr'.  It would be nicer to spot this situation
-        --        earlier and raise a proper error message, but it can really
-        --        only happen in `PrelPArr' anyway.
-        --
-
-    isPArrFakeAlts :: [CaseAlt DataCon] -> Bool
-    isPArrFakeAlts [alt] = isPArrFakeCon (alt_pat alt)
-    isPArrFakeAlts (alt:alts) =
-      case (isPArrFakeCon (alt_pat alt), isPArrFakeAlts alts) of
-        (True , True ) -> True
-        (False, False) -> False
-        _              -> panic "DsUtils: you may not mix `[:...:]' with `PArr' patterns"
-    isPArrFakeAlts [] = panic "DsUtils: unexpectedly found an empty list of PArr fake alternatives"
 
 mkCoSynCaseMatchResult :: Id -> Type -> CaseAlt PatSyn -> MatchResult
 mkCoSynCaseMatchResult var ty alt = MatchResult CanFail $ mkPatSynCase var ty alt
@@ -411,49 +384,6 @@ mkDataConCase var ty alts@(alt1:_) = MatchResult fail_flag mk_case
     un_mentioned_constructors
         = mkUniqSet data_cons `minusUniqSet` mentioned_constructors
     exhaustive_case = isEmptyUniqSet un_mentioned_constructors
-
---- Stuff for parallel arrays
---
---  * the following is to desugar cases over fake constructors for
---   parallel arrays, which are introduced by `tidy1' in the `PArrPat'
---   case
---
-mkPArrCase :: DynFlags -> Id -> Type -> [CaseAlt DataCon] -> CoreExpr
-           -> DsM CoreExpr
-mkPArrCase dflags var ty sorted_alts fail = do
-    lengthP <- dsDPHBuiltin lengthPVar
-    alt <- unboxAlt
-    return (mkWildCase (len lengthP) intTy ty [alt])
-  where
-    elemTy      = case splitTyConApp (idType var) of
-        (_, [elemTy]) -> elemTy
-        _             -> panic panicMsg
-    panicMsg    = "DsUtils.mkCoAlgCaseMatchResult: not a parallel array?"
-    len lengthP = mkApps (Var lengthP) [Type elemTy, Var var]
-    --
-    unboxAlt = do
-        l      <- newSysLocalDs intPrimTy
-        indexP <- dsDPHBuiltin indexPVar
-        alts   <- mapM (mkAlt indexP) sorted_alts
-        return (DataAlt intDataCon, [l], mkWildCase (Var l) intPrimTy ty (dft : alts))
-      where
-        dft  = (DEFAULT, [], fail)
-
-    --
-    -- each alternative matches one array length (corresponding to one
-    -- fake array constructor), so the match is on a literal; each
-    -- alternative's body is extended by a local binding for each
-    -- constructor argument, which are bound to array elements starting
-    -- with the first
-    --
-    mkAlt indexP alt@MkCaseAlt{alt_result = MatchResult _ bodyFun} = do
-        body <- bodyFun fail
-        return (LitAlt lit, [], mkCoreLets binds body)
-      where
-        lit   = MachInt $ toInteger (dataConSourceArity (alt_pat alt))
-        binds = [NonRec arg (indexExpr i) | (i, arg) <- zip [1..] (alt_bndrs alt)]
-        --
-        indexExpr i = mkApps (Var indexP) [Type elemTy, Var var, mkIntExpr dflags i]
 
 {-
 ************************************************************************
@@ -560,7 +490,7 @@ mkCoreAppDs s fun arg = mkCoreApp s fun arg  -- The rest is done in MkCore
 
 -- NB: No argument can be levity polymorphic
 mkCoreAppsDs :: SDoc -> CoreExpr -> [CoreExpr] -> CoreExpr
-mkCoreAppsDs s fun args = foldl (mkCoreAppDs s) fun args
+mkCoreAppsDs s fun args = foldl' (mkCoreAppDs s) fun args
 
 mkCastDs :: CoreExpr -> Coercion -> CoreExpr
 -- We define a desugarer-specific version of CoreUtils.mkCast,
@@ -977,13 +907,38 @@ mkBinaryTickBox ixT ixF e = do
 
 -- *******************************************************************
 
+{- Note [decideBangHood]
+~~~~~~~~~~~~~~~~~~~~~~~~
+With -XStrict we may make /outermost/ patterns more strict.
+E.g.
+       let (Just x) = e in ...
+          ==>
+       let !(Just x) = e in ...
+and
+       f x = e
+          ==>
+       f !x = e
+
+This adjustment is done by decideBangHood,
+
+  * Just before constructing an EqnInfo, in Match
+      (matchWrapper and matchSinglePat)
+
+  * When desugaring a pattern-binding in DsBinds.dsHsBind
+
+Note that it is /not/ done recursively.  See the -XStrict
+spec in the user manual.
+
+Specifically:
+   ~pat    => pat    -- when -XStrict (even if pat = ~pat')
+   !pat    => !pat   -- always
+   pat     => !pat   -- when -XStrict
+   pat     => pat    -- otherwise
+-}
+
+
 -- | Use -XStrict to add a ! or remove a ~
---
--- Examples:
--- ~pat    => pat    -- when -XStrict (even if pat = ~pat')
--- !pat    => !pat   -- always
--- pat     => !pat   -- when -XStrict
--- pat     => pat    -- otherwise
+-- See Note [decideBangHood]
 decideBangHood :: DynFlags
                -> LPat GhcTc  -- ^ Original pattern
                -> LPat GhcTc  -- Pattern with bang if necessary
@@ -1012,3 +967,32 @@ addBang = go
                                   -- Should we bring the extension value over?
            BangPat _ _   -> lp
            _             -> L l (BangPat noExt lp)
+
+isTrueLHsExpr :: LHsExpr GhcTc -> Maybe (CoreExpr -> DsM CoreExpr)
+
+-- Returns Just {..} if we're sure that the expression is True
+-- I.e.   * 'True' datacon
+--        * 'otherwise' Id
+--        * Trivial wappings of these
+-- The arguments to Just are any HsTicks that we have found,
+-- because we still want to tick then, even it they are always evaluated.
+isTrueLHsExpr (L _ (HsVar _ (L _ v))) |  v `hasKey` otherwiseIdKey
+                                      || v `hasKey` getUnique trueDataConId
+                                              = Just return
+        -- trueDataConId doesn't have the same unique as trueDataCon
+isTrueLHsExpr (L _ (HsConLikeOut _ con))
+  | con `hasKey` getUnique trueDataCon = Just return
+isTrueLHsExpr (L _ (HsTick _ tickish e))
+    | Just ticks <- isTrueLHsExpr e
+    = Just (\x -> do wrapped <- ticks x
+                     return (Tick tickish wrapped))
+   -- This encodes that the result is constant True for Hpc tick purposes;
+   -- which is specifically what isTrueLHsExpr is trying to find out.
+isTrueLHsExpr (L _ (HsBinTick _ ixT _ e))
+    | Just ticks <- isTrueLHsExpr e
+    = Just (\x -> do e <- ticks x
+                     this_mod <- getModule
+                     return (Tick (HpcTick this_mod ixT) e))
+
+isTrueLHsExpr (L _ (HsPar _ e))         = isTrueLHsExpr e
+isTrueLHsExpr _                       = Nothing

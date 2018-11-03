@@ -9,7 +9,8 @@ The @match@ function
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Match ( match, matchEquations, matchWrapper, matchSimply, matchSinglePat ) where
+module Match ( match, matchEquations, matchWrapper, matchSimply
+             , matchSinglePat, matchSinglePatVar ) where
 
 #include "HsVersions.h"
 
@@ -39,7 +40,6 @@ import MatchCon
 import MatchLit
 import Type
 import Coercion ( eqCoercion )
-import TcType ( toTcTypeBag )
 import TyCon( isNewTyCon )
 import TysWiredIn
 import SrcLoc
@@ -53,8 +53,8 @@ import Unique
 import UniqDFM
 
 import Control.Monad( when, unless )
+import Data.List ( groupBy )
 import qualified Data.Map as Map
-import Data.List (groupBy)
 
 {-
 ************************************************************************
@@ -153,6 +153,8 @@ is the scrutinee(s) of the match. The desugared expression may
 sometimes use that Id in a local binding or as a case binder.  So it
 should not have an External name; Lint rejects non-top-level binders
 with External names (Trac #13043).
+
+See also Note [Localise pattern binders] in DsUtils
 -}
 
 type MatchId = Id   -- See Note [Match Ids]
@@ -400,7 +402,7 @@ tidy1 :: Id                  -- The Id being scrutinised
 -- list patterns, etc) and returns any created bindings in the wrapper.
 
 tidy1 v (ParPat _ pat)      = tidy1 v (unLoc pat)
-tidy1 v (SigPat _ pat)      = tidy1 v (unLoc pat)
+tidy1 v (SigPat _ pat _)    = tidy1 v (unLoc pat)
 tidy1 _ (WildPat ty)        = return (idDsWrapper, WildPat ty)
 tidy1 v (BangPat _ (L l p)) = tidy_bang_pat v l p
 
@@ -449,14 +451,6 @@ tidy1 _ (ListPat (ListPatTc ty Nothing) pats )
                         (mkNilPat ty)
                         pats
 
--- Introduce fake parallel array constructors to be able to handle parallel
--- arrays with the existing machinery for constructor pattern
-tidy1 _ (PArrPat ty pats)
-  = return (idDsWrapper, unLoc parrConPat)
-  where
-    arity      = length pats
-    parrConPat = mkPrefixConPat (parrFakeCon arity) pats [ty]
-
 tidy1 _ (TuplePat tys pats boxity)
   = return (idDsWrapper, unLoc tuple_ConPat)
   where
@@ -474,7 +468,7 @@ tidy1 _ (LitPat _ lit)
 
 -- NPats: we *might* be able to replace these w/ a simpler form
 tidy1 _ (NPat ty (L _ lit) mb_neg eq)
-  = return (idDsWrapper, tidyNPat tidyLitPat lit mb_neg eq ty)
+  = return (idDsWrapper, tidyNPat lit mb_neg eq ty)
 
 -- Everything else goes through unchanged...
 
@@ -486,7 +480,7 @@ tidy_bang_pat :: Id -> SrcSpan -> Pat GhcTc -> DsM (DsWrapper, Pat GhcTc)
 
 -- Discard par/sig under a bang
 tidy_bang_pat v _ (ParPat _ (L l p)) = tidy_bang_pat v l p
-tidy_bang_pat v _ (SigPat _ (L l p)) = tidy_bang_pat v l p
+tidy_bang_pat v _ (SigPat _ (L l p) _) = tidy_bang_pat v l p
 
 -- Push the bang-pattern inwards, in the hope that
 -- it may disappear next time
@@ -499,7 +493,6 @@ tidy_bang_pat v _ p@(LitPat {})    = tidy1 v p
 tidy_bang_pat v _ p@(ListPat {})   = tidy1 v p
 tidy_bang_pat v _ p@(TuplePat {})  = tidy1 v p
 tidy_bang_pat v _ p@(SumPat {})    = tidy1 v p
-tidy_bang_pat v _ p@(PArrPat {})   = tidy1 v p
 
 -- Data/newtype constructors
 tidy_bang_pat v l p@(ConPatOut { pat_con = L _ (RealDataCon dc)
@@ -733,12 +726,12 @@ matchWrapper ctxt mb_scr (MG { mg_alts = L _ matches
     mk_eqn_info vars (L _ (Match { m_pats = pats, m_grhss = grhss }))
       = do { dflags <- getDynFlags
            ; let upats = map (unLoc . decideBangHood dflags) pats
-                 dicts = toTcTypeBag (collectEvVarsPats upats) -- Only TcTyVars
+                 dicts = collectEvVarsPats upats
            ; tm_cs <- genCaseTmCs2 mb_scr upats vars
            ; match_result <- addDictsDs dicts $ -- See Note [Type and Term Equality Propagation]
                              addTmCsDs tm_cs  $ -- See Note [Type and Term Equality Propagation]
                              dsGRHSs ctxt grhss rhs_ty
-           ; return (EqnInfo { eqn_pats = upats, eqn_rhs  = match_result}) }
+           ; return (EqnInfo { eqn_pats = upats, eqn_rhs = match_result}) }
     mk_eqn_info _ (L _ (XMatch _)) = panic "matchWrapper"
 
     handleWarnings = if isGenerated origin
@@ -787,7 +780,7 @@ matchSimply scrut hs_ctx pat result_expr fail_expr = do
 matchSinglePat :: CoreExpr -> HsMatchContext Name -> LPat GhcTc
                -> Type -> MatchResult -> DsM MatchResult
 -- matchSinglePat ensures that the scrutinee is a variable
--- and then calls match_single_pat_var
+-- and then calls matchSinglePatVar
 --
 -- matchSinglePat does not warn about incomplete patterns
 -- Used for things like [ e | pat <- stuff ], where
@@ -795,17 +788,17 @@ matchSinglePat :: CoreExpr -> HsMatchContext Name -> LPat GhcTc
 
 matchSinglePat (Var var) ctx pat ty match_result
   | not (isExternalName (idName var))
-  = match_single_pat_var var ctx pat ty match_result
+  = matchSinglePatVar var ctx pat ty match_result
 
 matchSinglePat scrut hs_ctx pat ty match_result
   = do { var           <- selectSimpleMatchVarL pat
-       ; match_result' <- match_single_pat_var var hs_ctx pat ty match_result
+       ; match_result' <- matchSinglePatVar var hs_ctx pat ty match_result
        ; return (adjustMatchResult (bindNonRec var scrut) match_result') }
 
-match_single_pat_var :: Id   -- See Note [Match Ids]
-                     -> HsMatchContext Name -> LPat GhcTc
-                     -> Type -> MatchResult -> DsM MatchResult
-match_single_pat_var var ctx pat ty match_result
+matchSinglePatVar :: Id   -- See Note [Match Ids]
+                  -> HsMatchContext Name -> LPat GhcTc
+                  -> Type -> MatchResult -> DsM MatchResult
+matchSinglePatVar var ctx pat ty match_result
   = ASSERT2( isInternalName (idName var), ppr var )
     do { dflags <- getDynFlags
        ; locn   <- getSrcSpanDs
@@ -887,7 +880,7 @@ subGroup :: (m -> [[EquationInfo]]) -- Map.elems
 -- Parameterized by map operations to allow different implementations
 -- and constraints, eg. types without Ord instance.
 subGroup elems empty lookup insert group
-    = map reverse $ elems $ foldl accumulate empty group
+    = map reverse $ elems $ foldl' accumulate empty group
   where
     accumulate pg_map (pg, eqn)
       = case lookup pg pg_map of

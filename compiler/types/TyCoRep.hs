@@ -26,6 +26,7 @@ module TyCoRep (
         Type(..),
         TyLit(..),
         KindOrType, Kind,
+        KnotTied,
         PredType, ThetaType,      -- Synonyms
         ArgFlag(..),
 
@@ -34,35 +35,40 @@ module TyCoRep (
         UnivCoProvenance(..),
         CoercionHole(..), coHoleCoVar, setCoHoleCoVar,
         CoercionN, CoercionR, CoercionP, KindCoercion,
+        MCoercion(..), MCoercionR, MCoercionN,
 
         -- * Functions over types
         mkTyConTy, mkTyVarTy, mkTyVarTys,
-        mkFunTy, mkFunTys, mkForAllTy, mkForAllTys,
-        mkPiTy, mkPiTys,
-        isTYPE, tcIsTYPE,
+        mkTyCoVarTy, mkTyCoVarTys,
+        mkFunTy, mkFunTys, mkTyCoForAllTy, mkForAllTys,
+        mkForAllTy,
+        mkTyCoPiTy, mkTyCoPiTys,
+        mkPiTys,
+        isTYPE,
         isLiftedTypeKind, isUnliftedTypeKind,
-        isCoercionType, isRuntimeRepTy, isRuntimeRepVar,
+        isRuntimeRepTy, isRuntimeRepVar,
         sameVis,
 
         -- * Functions over binders
-        TyBinder(..), TyVarBinder,
-        binderVar, binderVars, binderKind, binderArgFlag,
+        TyCoBinder(..), TyCoVarBinder, TyBinder,
+        binderVar, binderVars, binderType, binderArgFlag,
         delBinderVar,
         isInvisibleArgFlag, isVisibleArgFlag,
         isInvisibleBinder, isVisibleBinder,
+        isTyBinder,
 
         -- * Functions over coercions
         pickLR,
 
         -- * Pretty-printing
         pprType, pprParendType, pprPrecType,
-        pprTypeApp, pprTvBndr, pprTvBndrs,
+        pprTypeApp, pprTCvBndr, pprTCvBndrs,
         pprSigmaType,
         pprTheta, pprParendTheta, pprForAll, pprUserForAll,
         pprTyVar, pprTyVars,
         pprThetaArrowTy, pprClassPred,
         pprKind, pprParendKind, pprTyLit,
-        TyPrec(..), maybeParen,
+        PprPrec(..), topPrec, sigPrec, opPrec, funPrec, appPrec, maybeParen,
         pprDataCons, ppSuggestExplicitKinds,
 
         pprCo, pprParendCo,
@@ -73,14 +79,13 @@ module TyCoRep (
         tyCoVarsOfType, tyCoVarsOfTypeDSet, tyCoVarsOfTypes, tyCoVarsOfTypesDSet,
         tyCoFVsBndr, tyCoFVsOfType, tyCoVarsOfTypeList,
         tyCoFVsOfTypes, tyCoVarsOfTypesList,
-        closeOverKindsDSet, closeOverKindsFV, closeOverKindsList,
         coVarsOfType, coVarsOfTypes,
         coVarsOfCo, coVarsOfCos,
         tyCoVarsOfCo, tyCoVarsOfCos,
         tyCoVarsOfCoDSet,
         tyCoFVsOfCo, tyCoFVsOfCos,
         tyCoVarsOfCoList, tyCoVarsOfProv,
-        closeOverKinds,
+        almostDevoidCoVarOfCo,
         injectiveVarsOfBinder, injectiveVarsOfType,
 
         noFreeVarsOfType, noFreeVarsOfCo,
@@ -89,18 +94,20 @@ module TyCoRep (
         TCvSubst(..), TvSubstEnv, CvSubstEnv,
         emptyTvSubstEnv, emptyCvSubstEnv, composeTCvSubstEnv, composeTCvSubst,
         emptyTCvSubst, mkEmptyTCvSubst, isEmptyTCvSubst,
-        mkTCvSubst, mkTvSubst,
+        mkTCvSubst, mkTvSubst, mkCvSubst,
         getTvSubstEnv,
         getCvSubstEnv, getTCvInScope, getTCvSubstRangeFVs,
         isInScope, notElemTCvSubst,
         setTvSubstEnv, setCvSubstEnv, zapTCvSubst,
         extendTCvInScope, extendTCvInScopeList, extendTCvInScopeSet,
-        extendTCvSubst,
+        extendTCvSubst, extendTCvSubstWithClone,
         extendCvSubst, extendCvSubstWithClone,
         extendTvSubst, extendTvSubstBinderAndInScope, extendTvSubstWithClone,
         extendTvSubstList, extendTvSubstAndInScope,
+        extendTCvSubstList,
         unionTCvSubst, zipTyEnv, zipCoEnv, mkTyCoInScopeSet,
         zipTvSubst, zipCvSubst,
+        zipTCvSubst,
         mkTvSubstPrs,
 
         substTyWith, substTyWithCoVars, substTysWith, substTysWithCoVars,
@@ -111,25 +118,28 @@ module TyCoRep (
         substCoUnchecked, substCoWithUnchecked,
         substTyWithInScope,
         substTys, substTheta,
-        lookupTyVar, substTyVarBndr,
+        lookupTyVar,
         substCo, substCos, substCoVar, substCoVars, lookupCoVar,
-        substCoVarBndr, cloneTyVarBndr, cloneTyVarBndrs,
-        substTyVar, substTyVars,
+        cloneTyVarBndr, cloneTyVarBndrs,
+        substVarBndr, substVarBndrs,
+        substTyVarBndr, substTyVarBndrs,
+        substCoVarBndr,
+        substTyVar, substTyVars, substTyCoVars,
         substForAllCoBndr,
-        substTyVarBndrCallback, substForAllCoBndrCallback,
+        substVarBndrUsing, substForAllCoBndrUsing,
         checkValidSubst, isValidTCvSubst,
 
         -- * Tidying type related things up for printing
         tidyType,      tidyTypes,
         tidyOpenType,  tidyOpenTypes,
         tidyOpenKind,
-        tidyTyCoVarBndr, tidyTyCoVarBndrs, tidyFreeTyCoVars,
+        tidyVarBndr, tidyVarBndrs, tidyFreeTyCoVars,
         tidyOpenTyCoVar, tidyOpenTyCoVars,
-        tidyTyVarOcc,
+        tidyTyCoVarOcc,
         tidyTopType,
         tidyKind,
         tidyCo, tidyCos,
-        tidyTyVarBinder, tidyTyVarBinders,
+        tidyTyCoVarBinder, tidyTyCoVarBinders,
 
         -- * Sizes
         typeSize, coercionSize, provSize
@@ -145,8 +155,8 @@ import {-# SOURCE #-} DataCon( dataConFullSig
 import {-# SOURCE #-} Type( isPredTy, isCoercionTy, mkAppTy, mkCastTy
                           , tyCoVarsOfTypeWellScoped
                           , tyCoVarsOfTypesWellScoped
-                          , toposortTyVars
-                          , coreView, tcView )
+                          , scopedSort
+                          , coreView )
    -- Transitively pulls in a LOT of stuff, better to break the loop
 
 import {-# SOURCE #-} Coercion
@@ -166,7 +176,8 @@ import CoAxiom
 import FV
 
 -- others
-import BasicTypes ( LeftOrRight(..), TyPrec(..), maybeParen, pickLR )
+import BasicTypes ( LeftOrRight(..), PprPrec(..), topPrec, sigPrec, opPrec
+                  , funPrec, appPrec, maybeParen, pickLR )
 import PrelNames
 import Outputable
 import DynFlags
@@ -290,7 +301,7 @@ data Type
                         --    can appear as the right hand side of a type synonym.
 
   | ForAllTy
-        {-# UNPACK #-} !TyVarBinder
+        {-# UNPACK #-} !TyCoVarBinder
         Type            -- ^ A Π type.
 
   | FunTy Type Type     -- ^ t1 -> t2   Very common, so an important special case
@@ -359,11 +370,11 @@ appropriate for the implementation of eqType?
 Anything smaller than ~ and homogeneous is an appropriate definition for
 equality. The type safety of FC depends only on ~. Let's say η : τ ~ σ. Any
 expression of type τ can be transmuted to one of type σ at any point by
-casting. The same is true of types of type τ. So in some sense, τ and σ are
-interchangeable.
+casting. The same is true of expressions of type σ. So in some sense, τ and σ
+are interchangeable.
 
 But let's be more precise. If we examine the typing rules of FC (say, those in
-http://www.cis.upenn.edu/~eir/papers/2015/equalities/equalities-extended.pdf)
+https://cs.brynmawr.edu/~rae/papers/2015/equalities/equalities.pdf)
 there are several places where the same metavariable is used in two different
 premises to a rule. (For example, see Ty_App.) There is an implicit equality
 check here. What definition of equality should we use? By convention, we use
@@ -461,47 +472,87 @@ In sum, in order to uphold (EQ), we need the following three invariants:
         ForAllTy to a ForAllTy.
   (EQ2) No reflexive casts in CastTy.
   (EQ3) No nested CastTys.
+  (EQ4) No CastTy over (ForAllTy (Bndr tyvar vis) body).
+        See Note [Weird typing rule for ForAllTy] in Type.
 
 These invariants are all documented above, in the declaration for Type.
 
+Note [Unused coercion variable in ForAllTy]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Suppose we have
+  \(co:t1 ~ t2). e
+
+What type should we give to this expression?
+  (1) forall (co:t1 ~ t2) -> t
+  (2) (t1 ~ t2) -> t
+
+If co is used in t, (1) should be the right choice.
+if co is not used in t, we would like to have (1) and (2) equivalent.
+
+However, we want to keep eqType simple and don't want eqType (1) (2) to return
+True in any case.
+
+We decide to always construct (2) if co is not used in t.
+
+Thus in mkTyCoForAllTy, we check whether the variable is a coercion
+variable and whether it is used in the body. If so, it returns a FunTy
+instead of a ForAllTy.
+
+There are cases we want to skip the check. For example, the check is unnecessary
+when it is known from the context that the input variable is a type variable.
+In those cases, we use mkForAllTy.
 -}
+
+-- | A type labeled 'KnotTied' might have knot-tied tycons in it. See
+-- Note [Type checking recursive type and class declarations] in
+-- TcTyClsDecls
+type KnotTied ty = ty
 
 {- **********************************************************************
 *                                                                       *
-                  TyBinder and ArgFlag
+                  TyCoBinder and ArgFlag
 *                                                                       *
 ********************************************************************** -}
 
--- | A 'TyBinder' represents an argument to a function. TyBinders can be dependent
--- ('Named') or nondependent ('Anon'). They may also be visible or not.
--- See Note [TyBinders]
-data TyBinder
-  = Named TyVarBinder   -- A type-lambda binder
-  | Anon Type           -- A term-lambda binder
+-- | A 'TyCoBinder' represents an argument to a function. TyCoBinders can be
+-- dependent ('Named') or nondependent ('Anon'). They may also be visible or
+-- not. See Note [TyCoBinders]
+data TyCoBinder
+  = Named TyCoVarBinder -- A type-lambda binder
+  | Anon Type           -- A term-lambda binder. Type here can be CoercionTy.
                         -- Visibility is determined by the type (Constraint vs. *)
   deriving Data.Data
 
+-- | 'TyBinder' is like 'TyCoBinder', but there can only be 'TyVarBinder'
+-- in the 'Named' field.
+type TyBinder = TyCoBinder
+
 -- | Remove the binder's variable from the set, if the binder has
 -- a variable.
-delBinderVar :: VarSet -> TyVarBinder -> VarSet
-delBinderVar vars (TvBndr tv _) = vars `delVarSet` tv
+delBinderVar :: VarSet -> TyCoVarBinder -> VarSet
+delBinderVar vars (Bndr tv _) = vars `delVarSet` tv
 
 -- | Does this binder bind an invisible argument?
-isInvisibleBinder :: TyBinder -> Bool
-isInvisibleBinder (Named (TvBndr _ vis)) = isInvisibleArgFlag vis
-isInvisibleBinder (Anon ty)              = isPredTy ty
+isInvisibleBinder :: TyCoBinder -> Bool
+isInvisibleBinder (Named (Bndr _ vis)) = isInvisibleArgFlag vis
+isInvisibleBinder (Anon ty)            = isPredTy ty
 
 -- | Does this binder bind a visible argument?
-isVisibleBinder :: TyBinder -> Bool
+isVisibleBinder :: TyCoBinder -> Bool
 isVisibleBinder = not . isInvisibleBinder
 
+-- | If its a named binder, is the binder a tyvar?
+-- Returns True for nondependent binder.
+isTyBinder :: TyCoBinder -> Bool
+isTyBinder (Named bnd) = isTyVarBinder bnd
+isTyBinder _ = True
 
-{- Note [TyBinders]
+{- Note [TyCoBinders]
 ~~~~~~~~~~~~~~~~~~~
-A ForAllTy contains a TyVarBinder.  But a type can be decomposed
-to a telescope consisting of a [TyBinder]
+A ForAllTy contains a TyCoVarBinder.  But a type can be decomposed
+to a telescope consisting of a [TyCoBinder]
 
-A TyBinder represents the type of binders -- that is, the type of an
+A TyCoBinder represents the type of binders -- that is, the type of an
 argument to a Pi-type. GHC Core currently supports two different
 Pi-types:
 
@@ -512,23 +563,23 @@ Pi-types:
 
  * A dependent compile-time-only polytype,
    written with forall, e.g.  forall (a:*). ty
-   represented as ForAllTy (TvBndr a v) ty
+   represented as ForAllTy (Bndr a v) ty
 
 Both Pi-types classify terms/types that take an argument. In other
 words, if `x` is either a function or a polytype, `x arg` makes sense
 (for an appropriate `arg`).
 
 
-Note [TyVarBndrs, TyVarBinders, TyConBinders, and visibility]
+Note [VarBndrs, TyCoVarBinders, TyConBinders, and visibility]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-* A ForAllTy (used for both types and kinds) contains a TyVarBinder.
-  Each TyVarBinder
-      TvBndr a tvis
+* A ForAllTy (used for both types and kinds) contains a TyCoVarBinder.
+  Each TyCoVarBinder
+      Bndr a tvis
   is equipped with tvis::ArgFlag, which says whether or not arguments
   for this binder should be visible (explicit) in source Haskell.
 
 * A TyCon contains a list of TyConBinders.  Each TyConBinder
-      TvBndr a cvis
+      Bndr a cvis
   is equipped with cvis::TyConBndrVis, which says whether or not type
   and kind arguments for this TyCon should be visible (explicit) in
   source Haskell.
@@ -537,18 +588,20 @@ This table summarises the visibility rules:
 ---------------------------------------------------------------------------------------
 |                                                      Occurrences look like this
 |                             GHC displays type as     in Haskell source code
-|-----------------------------------------------------------------------
-| TvBndr a tvis :: TyVarBinder, in the binder of ForAllTy for a term
+|--------------------------------------------------------------------------------------
+| Bndr a tvis :: TyCoVarBinder, in the binder of ForAllTy for a term
 |  tvis :: ArgFlag
 |  tvis = Inferred:            f :: forall {a}. type    Arg not allowed:  f
+                               f :: forall {co}. type   Arg not allowed:  f
 |  tvis = Specified:           f :: forall a. type      Arg optional:     f  or  f @Int
 |  tvis = Required:            T :: forall k -> type    Arg required:     T *
-|    This last form is illegal in terms: See Note [No Required TyBinder in terms]
+|    This last form is illegal in terms: See Note [No Required TyCoBinder in terms]
 |
-| TvBndr k cvis :: TyConBinder, in the TyConBinders of a TyCon
+| Bndr k cvis :: TyConBinder, in the TyConBinders of a TyCon
 |  cvis :: TyConBndrVis
 |  cvis = AnonTCB:             T :: kind -> kind        Required:            T *
 |  cvis = NamedTCB Inferred:   T :: forall {k}. kind    Arg not allowed:     T
+|                              T :: forall {co}. kind   Arg not allowed:     T
 |  cvis = NamedTCB Specified:  T :: forall k. kind      Arg not allowed[1]:  T
 |  cvis = NamedTCB Required:   T :: forall k -> kind    Required:            T *
 ---------------------------------------------------------------------------------------
@@ -557,9 +610,7 @@ This table summarises the visibility rules:
     optional kind applications, thus (T @*), but we have not
     yet implemented that
 
----- Examples of where the different visibilities come from -----
-
-In term declarations:
+---- In term declarations ----
 
 * Inferred.  Function defn, with no signature:  f1 x = x
   We infer f1 :: forall {a}. a -> a, with 'a' Inferred
@@ -568,12 +619,12 @@ In term declarations:
 
 * Specified.  Function defn, with signature (implicit forall):
      f2 :: a -> a; f2 x = x
-  So f2 gets the type f2 :: forall a. a->a, with 'a' Specified
+  So f2 gets the type f2 :: forall a. a -> a, with 'a' Specified
   even though 'a' is not bound in the source code by an explicit forall
 
 * Specified.  Function defn, with signature (explicit forall):
      f3 :: forall a. a -> a; f3 x = x
-  So f3 gets the type f3 :: forall a. a->a, with 'a' Specified
+  So f3 gets the type f3 :: forall a. a -> a, with 'a' Specified
 
 * Inferred/Specified.  Function signature with inferred kind polymorphism.
      f4 :: a b -> Int
@@ -590,14 +641,14 @@ In term declarations:
   Inferred - from inferred types (e.g. no pattern type signature)
            - or from inferred kind polymorphism
 
-In type declarations:
+---- In type declarations ----
 
 * Inferred (k)
      data T1 a b = MkT1 (a b)
   Here T1's kind is  T1 :: forall {k:*}. (k->*) -> k -> *
   The kind variable 'k' is Inferred, since it is not mentioned
 
-  Note that 'a' and 'b' correspond to /Anon/ TyBinders in T1's kind,
+  Note that 'a' and 'b' correspond to /Anon/ TyCoBinders in T1's kind,
   and Anon binders don't have a visibility flag. (Or you could think
   of Anon having an implicit Required flag.)
 
@@ -618,6 +669,21 @@ In type declarations:
   Here T's kind is  T :: forall {k1:*} (k:*). (k1->*) -> k1 -> k -> *
   So 'k' is Specified, because it appears explicitly,
   but 'k1' is Inferred, because it does not
+
+Generally, in the list of TyConBinders for a TyCon,
+
+* Inferred arguments always come first
+* Specified, Anon and Required can be mixed
+
+e.g.
+  data Foo (a :: Type) :: forall b. (a -> b -> Type) -> Type where ...
+
+Here Foo's TyConBinders are
+   [Required 'a', Specified 'b', Anon]
+and its kind prints as
+   Foo :: forall a -> forall b. (a -> b -> Type) -> Type
+
+See also Note [Required, Specified, and Inferred for types] in TcTyClsDecls
 
 ---- Printing -----
 
@@ -644,14 +710,14 @@ In type declarations:
 * Inferred variables correspond to "generalized" variables from the
   Visible Type Applications paper (ESOP'16).
 
-Note [No Required TyBinder in terms]
+Note [No Required TyCoBinder in terms]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We don't allow Required foralls for term variables, including pattern
 synonyms and data constructors.  Why?  Because then an application
 would need a /compulsory/ type argument (possibly without an "@"?),
 thus (f Int); and we don't have concrete syntax for that.
 
-We could change this decision, but Required, Named TyBinders are rare
+We could change this decision, but Required, Named TyCoBinders are rare
 anyway.  (Most are Anons.)
 -}
 
@@ -712,13 +778,22 @@ These functions are here so that they can be used by TysPrim,
 which in turn is imported by Type
 -}
 
--- named with "Only" to prevent naive use of mkTyVarTy
 mkTyVarTy  :: TyVar   -> Type
 mkTyVarTy v = ASSERT2( isTyVar v, ppr v <+> dcolon <+> ppr (tyVarKind v) )
-                  TyVarTy v
+              TyVarTy v
 
 mkTyVarTys :: [TyVar] -> [Type]
 mkTyVarTys = map mkTyVarTy -- a common use of mkTyVarTy
+
+mkTyCoVarTy :: TyCoVar -> Type
+mkTyCoVarTy v
+  | isTyVar v
+  = TyVarTy v
+  | otherwise
+  = CoercionTy (CoVarCo v)
+
+mkTyCoVarTys :: [TyCoVar] -> [Type]
+mkTyCoVarTys = map mkTyCoVarTy
 
 infixr 3 `mkFunTy`      -- Associates to the right
 -- | Make an arrow type
@@ -729,30 +804,42 @@ mkFunTy arg res = FunTy arg res
 mkFunTys :: [Type] -> Type -> Type
 mkFunTys tys ty = foldr mkFunTy ty tys
 
-mkForAllTy :: TyVar -> ArgFlag -> Type -> Type
-mkForAllTy tv vis ty = ForAllTy (TvBndr tv vis) ty
+-- | If tv is a coercion variable and it is not used in the body, returns
+-- a FunTy, otherwise makes a forall type.
+-- See Note [Unused coercion variable in ForAllTy]
+mkTyCoForAllTy :: TyCoVar -> ArgFlag -> Type -> Type
+mkTyCoForAllTy tv vis ty
+  | isCoVar tv
+  , not (tv `elemVarSet` tyCoVarsOfType ty)
+  = ASSERT( vis == Inferred )
+    mkFunTy (varType tv) ty
+  | otherwise
+  = ForAllTy (Bndr tv vis) ty
 
--- | Wraps foralls over the type using the provided 'TyVar's from left to right
-mkForAllTys :: [TyVarBinder] -> Type -> Type
+-- | Like 'mkTyCoForAllTy', but does not check the occurrence of the binder
+-- See Note [Unused coercion variable in ForAllTy]
+mkForAllTy :: TyCoVar -> ArgFlag -> Type -> Type
+mkForAllTy tv vis ty = ForAllTy (Bndr tv vis) ty
+
+-- | Wraps foralls over the type using the provided 'TyCoVar's from left to right
+mkForAllTys :: [TyCoVarBinder] -> Type -> Type
 mkForAllTys tyvars ty = foldr ForAllTy ty tyvars
 
-mkPiTy :: TyBinder -> Type -> Type
-mkPiTy (Anon ty1) ty2 = FunTy ty1 ty2
-mkPiTy (Named tvb) ty = ForAllTy tvb ty
+mkTyCoPiTy :: TyCoBinder -> Type -> Type
+mkTyCoPiTy (Anon ty1) ty2           = FunTy ty1 ty2
+mkTyCoPiTy (Named (Bndr tv vis)) ty = mkTyCoForAllTy tv vis ty
 
-mkPiTys :: [TyBinder] -> Type -> Type
+-- | Like 'mkTyCoPiTy', but does not check the occurrence of the binder
+mkPiTy:: TyCoBinder -> Type -> Type
+mkPiTy (Anon ty1) ty2           = FunTy ty1 ty2
+mkPiTy (Named (Bndr tv vis)) ty = mkForAllTy tv vis ty
+
+mkTyCoPiTys :: [TyCoBinder] -> Type -> Type
+mkTyCoPiTys tbs ty = foldr mkTyCoPiTy ty tbs
+
+-- | Like 'mkTyCoPiTys', but does not check the occurrence of the binder
+mkPiTys :: [TyCoBinder] -> Type -> Type
 mkPiTys tbs ty = foldr mkPiTy ty tbs
-
--- | Does this type classify a core (unlifted) Coercion?
--- At either role nominal or representational
---    (t1 ~# t2) or (t1 ~R# t2)
-isCoercionType :: Type -> Bool
-isCoercionType (TyConApp tc tys)
-  | (tc `hasKey` eqPrimTyConKey) || (tc `hasKey` eqReprPrimTyConKey)
-  , tys `lengthIs` 4
-  = True
-isCoercionType _ = False
-
 
 -- | Create the plain type constructor type which has been applied to no type arguments at all.
 mkTyConTy :: TyCon -> Type
@@ -779,26 +866,9 @@ isTYPE f (TyConApp tc [arg])
       go ty = f ty
 isTYPE _ _ = False
 
--- | If a type is @'TYPE' r@ for some @r@, run the predicate argument on @r@.
--- Otherwise, return 'False'.
---
--- This function distinguishes between 'Constraint' and 'Type' (and will return
--- 'False' for 'Constraint'). For a version which does not distinguish between
--- the two, see 'isTYPE'.
-tcIsTYPE :: (   Type    -- the single argument to TYPE; not a synonym
-             -> Bool )  -- what to return
-         -> Kind -> Bool
-tcIsTYPE f ki | Just ki' <- tcView ki = tcIsTYPE f ki'
-tcIsTYPE f (TyConApp tc [arg])
-  | tc `hasKey` tYPETyConKey
-  = go arg
-    where
-      go ty | Just ty' <- tcView ty = go ty'
-      go ty = f ty
-tcIsTYPE _ _ = False
-
 -- | This version considers Constraint to be the same as *. Returns True
 -- if the argument is equivalent to Type/Constraint and False otherwise.
+-- See Note [Kind Constraint and kind Type]
 isLiftedTypeKind :: Kind -> Bool
 isLiftedTypeKind = isTYPE is_lifted
   where
@@ -847,8 +917,8 @@ data Coercion
   --    -   _ stands for a parameter that is not a Role or Coercion.
 
   -- These ones mirror the shape of types
-  = -- Refl :: "e" -> _ -> e
-    Refl Role Type  -- See Note [Refl invariant]
+  = -- Refl :: _ -> N
+    Refl Type  -- See Note [Refl invariant]
           -- Invariant: applications of (Refl T) to a bunch of identity coercions
           --            always show up as Refl.
           -- For example  (Refl T) (Refl a) (Refl b) shows up as (Refl (T a b)).
@@ -859,7 +929,13 @@ data Coercion
           -- ConAppCo coercions (like all coercions other than Refl)
           -- are NEVER the identity.
 
-          -- Use (Refl Representational _), not (SubCo (Refl Nominal _))
+          -- Use (GRefl Representational ty MRefl), not (SubCo (Refl ty))
+
+  -- GRefl :: "e" -> _ -> Maybe N -> e
+  -- See Note [Generalized reflexive coercion]
+  | GRefl Role Type MCoercionN  -- See Note [Refl invariant]
+          -- Use (Refl ty), not (GRefl Nominal ty MRefl)
+          -- Use (GRefl Representational _ _), not (SubCo (GRefl Nominal _ _))
 
   -- These ones simply lift the correspondingly-named
   -- Type constructors into Coercions
@@ -875,7 +951,7 @@ data Coercion
           -- AppCo :: e -> N -> e
 
   -- See Note [Forall coercions]
-  | ForAllCo TyVar KindCoercion Coercion
+  | ForAllCo TyCoVar KindCoercion Coercion
          -- ForAllCo :: _ -> N -> e -> e
 
   | FunCo Role Coercion Coercion         -- lift FunTy
@@ -919,11 +995,6 @@ data Coercion
     -- :: e -> N -> e
     -- See Note [InstCo roles]
 
-  -- Coherence applies a coercion to the left-hand type of another coercion
-  -- See Note [Coherence]
-  | CoherenceCo Coercion KindCoercion
-     -- :: e -> N -> e
-
   -- Extract a kind coercion from a (heterogeneous) type coercion
   -- NB: all kind coercions are Nominal
   | KindCo Coercion
@@ -941,13 +1012,28 @@ type CoercionR = Coercion       -- always representational
 type CoercionP = Coercion       -- always phantom
 type KindCoercion = CoercionN   -- always nominal
 
+-- | A semantically more meaningful type to represent what may or may not be a
+-- useful 'Coercion'.
+data MCoercion
+  = MRefl
+    -- A trivial Reflexivity coercion
+  | MCo Coercion
+    -- Other coercions
+  deriving Data.Data
+type MCoercionR = MCoercion
+type MCoercionN = MCoercion
+
+instance Outputable MCoercion where
+  ppr MRefl    = text "MRefl"
+  ppr (MCo co) = text "MCo" <+> ppr co
+
 {-
 Note [Refl invariant]
 ~~~~~~~~~~~~~~~~~~~~~
 Invariant 1:
 
 Coercions have the following invariant
-     Refl is always lifted as far as possible.
+     Refl (similar for GRefl r ty MRefl) is always lifted as far as possible.
 
 You might think that a consequencs is:
      Every identity coercions has Refl at the root
@@ -957,6 +1043,42 @@ But that's not quite true because of coercion variables.  Consider
      Left h    where h :: Maybe Int ~ Maybe Int
 etc.  So the consequence is only true of coercions that
 have no coercion variables.
+
+Note [Generalized reflexive coercion]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GRefl is a generalized reflexive coercion (see Trac #15192). It wraps a kind
+coercion, which might be reflexive (MRefl) or any coercion (MCo co). The typing
+rules for GRefl:
+
+  ty : k1
+  ------------------------------------
+  GRefl r ty MRefl: ty ~r ty
+
+  ty : k1       co :: k1 ~ k2
+  ------------------------------------
+  GRefl r ty (MCo co) : ty ~r ty |> co
+
+Consider we have
+
+   g1 :: s ~r t
+   s  :: k1
+   g2 :: k1 ~ k2
+
+and we want to construct a coercions co which has type
+
+   (s |> g2) ~r t
+
+We can define
+
+   co = Sym (GRefl r s g2) ; g1
+
+It is easy to see that
+
+   Refl == GRefl Nominal ty MRefl :: ty ~n ty
+
+A nominal reflexive coercion is quite common, so we keep the special form Refl to
+save allocation.
 
 Note [Coercion axioms applied to coercions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1026,9 +1148,10 @@ The typing rule is:
   ForAllCo tv1 kind_co co : all tv1:k1. t1  ~
                             all tv1:k2. (t2[tv1 |-> tv1 |> sym kind_co])
 
-First, the TyVar stored in a ForAllCo is really an optimisation: this field
+First, the TyCoVar stored in a ForAllCo is really an optimisation: this field
 should be a Name, as its kind is redundant. Thinking of the field as a Name
 is helpful in understanding what a ForAllCo means.
+The kind of TyCoVar always matches the left-hand kind of the coercion.
 
 The idea is that kind_co gives the two kinds of the tyvar. See how, in the
 conclusion, tv1 is assigned kind k1 on the left but kind k2 on the right.
@@ -1048,19 +1171,6 @@ This all really would work storing just a Name in the ForAllCo. But we can't
 add Names to, e.g., VarSets, and there generally is just an impedance mismatch
 in a bunch of places. So we use tv1. When we need tv2, we can use
 setTyVarKind.
-
-Note [Coherence]
-~~~~~~~~~~~~~~~~
-The Coherence typing rule is thus:
-
-  g1 : s ~ t    s : k1    g2 : k1 ~ k2
-  ------------------------------------
-  CoherenceCo g1 g2 : (s |> g2) ~ t
-
-While this looks (and is) unsymmetric, a combination of other coercion
-combinators can make the symmetric version.
-
-For role information, see Note [Roles and kind coercions].
 
 Note [Predicate coercions]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1438,7 +1548,7 @@ In core, we get
   MkG :: forall (a :: *). (a ~ Bool) -> G a
 
 Now, consider 'MkG -- that is, MkG used in a type -- and suppose we want
-a proof that ('MkG co1 a1) ~ ('MkG co2 a2). This will have to be
+a proof that ('MkG a1 co1) ~ ('MkG a2 co2). This will have to be
 
   TyConAppCo Nominal MkG [co3, co4]
   where
@@ -1453,7 +1563,7 @@ Here,
   co3 = UnivCo (ProofIrrelProv co5) Nominal (CoercionTy co1) (CoercionTy co2)
   where
     co5 :: (a1 ~ Bool) ~ (a2 ~ Bool)
-    co5 = TyConAppCo Nominal (~) [<*>, <*>, co4, <Bool>]
+    co5 = TyConAppCo Nominal (~#) [<*>, <*>, co4, <Bool>]
 
 
 %************************************************************************
@@ -1476,15 +1586,208 @@ Example: The tyCoVars of this ((a:* -> k) Int) is {a, k}.
 We could /not/ close over the kinds of the variable occurrences, and
 instead do so at call sites, but it seems that we always want to do
 so, so it's easiest to do it here.
+
+It turns out that getting the free variables of types is performance critical,
+so we profiled several versions, exploring different implementation strategies.
+
+1. Baseline version: uses FV naively. Essentially:
+
+   tyCoVarsOfType ty = fvVarSet $ tyCoFVsOfType ty
+
+   This is not nice, because FV introduces some overhead to implement
+   determinism, and throught its "interesting var" function, neither of which
+   we need here, so they are a complete waste.
+
+2. UnionVarSet version: instead of reusing the FV-based code, we simply used
+   VarSets directly, trying to avoid the overhead of FV. E.g.:
+
+   -- FV version:
+   tyCoFVsOfType (AppTy fun arg)    a b c = (tyCoFVsOfType fun `unionFV` tyCoFVsOfType arg) a b c
+
+   -- UnionVarSet version:
+   tyCoVarsOfType (AppTy fun arg)    = (tyCoVarsOfType fun `unionVarSet` tyCoVarsOfType arg)
+
+   This looks deceptively similar, but while FV internally builds a list- and
+   set-generating function, the VarSet functions manipulate sets directly, and
+   the latter peforms a lot worse than the naive FV version.
+
+3. Accumulator-style VarSet version: this is what we use now. We do use VarSet
+   as our data structure, but delegate the actual work to a new
+   ty_co_vars_of_...  family of functions, which use accumulator style and the
+   "in-scope set" filter found in the internals of FV, but without the
+   determinism overhead.
+
+See Trac #14880.
+
+Note [Closing over free variable kinds]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tyCoVarsOfType and tyCoFVsOfType, while traversing a type, will also close over
+free variable kinds. In previous GHC versions, this happened naively: whenever
+we would encounter an occurrence of a free type variable, we would close over
+its kind. This, however is wrong for two reasons (see Trac #14880):
+
+1. Efficiency. If we have Proxy (a::k) -> Proxy (a::k) -> Proxy (a::k), then
+   we don't want to have to traverse k more than once.
+
+2. Correctness. Imagine we have forall k. b -> k, where b has
+   kind k, for some k bound in an outer scope. If we look at b's kind inside
+   the forall, we'll collect that k is free and then remove k from the set of
+   free variables. This is plain wrong. We must instead compute that b is free
+   and then conclude that b's kind is free.
+
+An obvious first approach is to move the closing-over-kinds from the
+occurrences of a type variable to after finding the free vars - however, this
+turns out to introduce performance regressions, and isn't even entirely
+correct.
+
+In fact, it isn't even important *when* we close over kinds; what matters is
+that we handle each type var exactly once, and that we do it in the right
+context.
+
+So the next approach we tried was to use the "in-scope set" part of FV or the
+equivalent argument in the accumulator-style `ty_co_vars_of_type` function, to
+say "don't bother with variables we have already closed over". This should work
+fine in theory, but the code is complicated and doesn't perform well.
+
+But there is a simpler way, which is implemented here. Consider the two points
+above:
+
+1. Efficiency: we now have an accumulator, so the second time we encounter 'a',
+   we'll ignore it, certainly not looking at its kind - this is why
+   pre-checking set membership before inserting ends up not only being faster,
+   but also being correct.
+
+2. Correctness: we have an "in-scope set" (I think we should call it it a
+  "bound-var set"), specifying variables that are bound by a forall in the type
+  we are traversing; we simply ignore these variables, certainly not looking at
+  their kind.
+
+So now consider:
+
+    forall k. b -> k
+
+where b :: k->Type is free; but of course, it's a different k! When looking at
+b -> k we'll have k in the bound-var set. So we'll ignore the k. But suppose
+this is our first encounter with b; we want the free vars of its kind. But we
+want to behave as if we took the free vars of its kind at the end; that is,
+with no bound vars in scope.
+
+So the solution is easy. The old code was this:
+
+  ty_co_vars_of_type (TyVarTy v) is acc
+    | v `elemVarSet` is  = acc
+    | v `elemVarSet` acc = acc
+    | otherwise          = ty_co_vars_of_type (tyVarKind v) is (extendVarSet acc v)
+
+Now all we need to do is take the free vars of tyVarKind v *with an empty
+bound-var set*, thus:
+
+ty_co_vars_of_type (TyVarTy v) is acc
+  | v `elemVarSet` is  = acc
+  | v `elemVarSet` acc = acc
+  | otherwise          = ty_co_vars_of_type (tyVarKind v) emptyVarSet (extendVarSet acc v)
+                                                          ^^^^^^^^^^^
+
+And that's it.
+
 -}
 
-
--- | Returns free variables of a type, including kind variables as
--- a non-deterministic set. For type synonyms it does /not/ expand the
--- synonym.
 tyCoVarsOfType :: Type -> TyCoVarSet
 -- See Note [Free variables of types]
-tyCoVarsOfType ty = fvVarSet $ tyCoFVsOfType ty
+tyCoVarsOfType ty = ty_co_vars_of_type ty emptyVarSet emptyVarSet
+
+tyCoVarsOfTypes :: [Type] -> TyCoVarSet
+tyCoVarsOfTypes tys = ty_co_vars_of_types tys emptyVarSet emptyVarSet
+
+ty_co_vars_of_type :: Type -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_type (TyVarTy v) is acc
+  | v `elemVarSet` is  = acc
+  | v `elemVarSet` acc = acc
+  | otherwise          = ty_co_vars_of_type (tyVarKind v)
+                            emptyVarSet  -- See Note [Closing over free variable kinds]
+                            (extendVarSet acc v)
+
+ty_co_vars_of_type (TyConApp _ tys)   is acc = ty_co_vars_of_types tys is acc
+ty_co_vars_of_type (LitTy {})         _  acc = acc
+ty_co_vars_of_type (AppTy fun arg)    is acc = ty_co_vars_of_type fun is (ty_co_vars_of_type arg is acc)
+ty_co_vars_of_type (FunTy arg res)    is acc = ty_co_vars_of_type arg is (ty_co_vars_of_type res is acc)
+ty_co_vars_of_type (ForAllTy (Bndr tv _) ty) is acc = ty_co_vars_of_type (varType tv) is $
+                                                      ty_co_vars_of_type ty (extendVarSet is tv) acc
+ty_co_vars_of_type (CastTy ty co)     is acc = ty_co_vars_of_type ty is (ty_co_vars_of_co co is acc)
+ty_co_vars_of_type (CoercionTy co)    is acc = ty_co_vars_of_co co is acc
+
+ty_co_vars_of_types :: [Type] -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_types []       _  acc = acc
+ty_co_vars_of_types (ty:tys) is acc = ty_co_vars_of_type ty is (ty_co_vars_of_types tys is acc)
+
+tyCoVarsOfCo :: Coercion -> TyCoVarSet
+-- See Note [Free variables of types]
+tyCoVarsOfCo co = ty_co_vars_of_co co emptyVarSet emptyVarSet
+
+tyCoVarsOfCos :: [Coercion] -> TyCoVarSet
+tyCoVarsOfCos cos = ty_co_vars_of_cos cos emptyVarSet emptyVarSet
+
+
+ty_co_vars_of_co :: Coercion -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_co (Refl ty)            is acc = ty_co_vars_of_type ty is acc
+ty_co_vars_of_co (GRefl _ ty mco)     is acc = ty_co_vars_of_type ty is $
+                                               ty_co_vars_of_mco mco is acc
+ty_co_vars_of_co (TyConAppCo _ _ cos) is acc = ty_co_vars_of_cos cos is acc
+ty_co_vars_of_co (AppCo co arg)       is acc = ty_co_vars_of_co co is $
+                                               ty_co_vars_of_co arg is acc
+ty_co_vars_of_co (ForAllCo tv kind_co co) is acc = ty_co_vars_of_co kind_co is $
+                                                   ty_co_vars_of_co co (extendVarSet is tv) acc
+ty_co_vars_of_co (FunCo _ co1 co2)    is acc = ty_co_vars_of_co co1 is $
+                                               ty_co_vars_of_co co2 is acc
+ty_co_vars_of_co (CoVarCo v)          is acc = ty_co_vars_of_co_var v is acc
+ty_co_vars_of_co (HoleCo h)           is acc = ty_co_vars_of_co_var (coHoleCoVar h) is acc
+    -- See Note [CoercionHoles and coercion free variables]
+ty_co_vars_of_co (AxiomInstCo _ _ cos) is acc = ty_co_vars_of_cos cos is acc
+ty_co_vars_of_co (UnivCo p _ t1 t2)    is acc = ty_co_vars_of_prov p is $
+                                                ty_co_vars_of_type t1 is $
+                                                ty_co_vars_of_type t2 is acc
+ty_co_vars_of_co (SymCo co)          is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_co (TransCo co1 co2)   is acc = ty_co_vars_of_co co1 is $
+                                              ty_co_vars_of_co co2 is acc
+ty_co_vars_of_co (NthCo _ _ co)      is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_co (LRCo _ co)         is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_co (InstCo co arg)     is acc = ty_co_vars_of_co co is $
+                                              ty_co_vars_of_co arg is acc
+ty_co_vars_of_co (KindCo co)         is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_co (SubCo co)          is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_co (AxiomRuleCo _ cs)  is acc = ty_co_vars_of_cos cs is acc
+
+ty_co_vars_of_mco :: MCoercion -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_mco MRefl    _is acc = acc
+ty_co_vars_of_mco (MCo co) is  acc = ty_co_vars_of_co co is acc
+
+ty_co_vars_of_co_var :: CoVar -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_co_var v is acc
+  | v `elemVarSet` is  = acc
+  | v `elemVarSet` acc = acc
+  | otherwise          = ty_co_vars_of_type (varType v)
+                            emptyVarSet  -- See Note [Closing over free variable kinds]
+                            (extendVarSet acc v)
+
+ty_co_vars_of_cos :: [Coercion] -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_cos []       _  acc = acc
+ty_co_vars_of_cos (co:cos) is acc = ty_co_vars_of_co co is (ty_co_vars_of_cos cos is acc)
+
+tyCoVarsOfProv :: UnivCoProvenance -> TyCoVarSet
+tyCoVarsOfProv prov = ty_co_vars_of_prov prov emptyVarSet emptyVarSet
+
+ty_co_vars_of_prov :: UnivCoProvenance -> TyCoVarSet -> TyCoVarSet -> TyCoVarSet
+ty_co_vars_of_prov (PhantomProv co)    is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_prov (ProofIrrelProv co) is acc = ty_co_vars_of_co co is acc
+ty_co_vars_of_prov UnsafeCoerceProv    _  acc = acc
+ty_co_vars_of_prov (PluginProv _)      _  acc = acc
+
+-- | Generates an in-scope set from the free variables in a list of types
+-- and a list of coercions
+mkTyCoInScopeSet :: [Type] -> [Coercion] -> InScopeSet
+mkTyCoInScopeSet tys cos
+  = mkInScopeSet (ty_co_vars_of_types tys emptyVarSet $
+                  ty_co_vars_of_cos   cos emptyVarSet emptyVarSet)
 
 -- | `tyCoFVsOfType` that returns free variables of a type in a deterministic
 -- set. For explanation of why using `VarSet` is not deterministic see
@@ -1500,44 +1803,12 @@ tyCoVarsOfTypeList :: Type -> [TyCoVar]
 -- See Note [Free variables of types]
 tyCoVarsOfTypeList ty = fvVarList $ tyCoFVsOfType ty
 
--- | The worker for `tyCoFVsOfType` and `tyCoFVsOfTypeList`.
--- The previous implementation used `unionVarSet` which is O(n+m) and can
--- make the function quadratic.
--- It's exported, so that it can be composed with
--- other functions that compute free variables.
--- See Note [FV naming conventions] in FV.
---
--- Eta-expanded because that makes it run faster (apparently)
--- See Note [FV eta expansion] in FV for explanation.
-tyCoFVsOfType :: Type -> FV
--- See Note [Free variables of types]
-tyCoFVsOfType (TyVarTy v)        a b c = (unitFV v `unionFV` tyCoFVsOfType (tyVarKind v)) a b c
-tyCoFVsOfType (TyConApp _ tys)   a b c = tyCoFVsOfTypes tys a b c
-tyCoFVsOfType (LitTy {})         a b c = emptyFV a b c
-tyCoFVsOfType (AppTy fun arg)    a b c = (tyCoFVsOfType fun `unionFV` tyCoFVsOfType arg) a b c
-tyCoFVsOfType (FunTy arg res)    a b c = (tyCoFVsOfType arg `unionFV` tyCoFVsOfType res) a b c
-tyCoFVsOfType (ForAllTy bndr ty) a b c = tyCoFVsBndr bndr (tyCoFVsOfType ty)  a b c
-tyCoFVsOfType (CastTy ty co)     a b c = (tyCoFVsOfType ty `unionFV` tyCoFVsOfCo co) a b c
-tyCoFVsOfType (CoercionTy co)    a b c = tyCoFVsOfCo co a b c
-
-tyCoFVsBndr :: TyVarBinder -> FV -> FV
--- Free vars of (forall b. <thing with fvs>)
-tyCoFVsBndr (TvBndr tv _) fvs = (delFV tv fvs)
-                                `unionFV` tyCoFVsOfType (tyVarKind tv)
-
--- | Returns free variables of types, including kind variables as
--- a non-deterministic set. For type synonyms it does /not/ expand the
--- synonym.
-tyCoVarsOfTypes :: [Type] -> TyCoVarSet
--- See Note [Free variables of types]
-tyCoVarsOfTypes tys = fvVarSet $ tyCoFVsOfTypes tys
-
 -- | Returns free variables of types, including kind variables as
 -- a non-deterministic set. For type synonyms it does /not/ expand the
 -- synonym.
 tyCoVarsOfTypesSet :: TyVarEnv Type -> TyCoVarSet
 -- See Note [Free variables of types]
-tyCoVarsOfTypesSet tys = fvVarSet $ tyCoFVsOfTypes $ nonDetEltsUFM tys
+tyCoVarsOfTypesSet tys = tyCoVarsOfTypes $ nonDetEltsUFM tys
   -- It's OK to use nonDetEltsUFM here because we immediately forget the
   -- ordering by returning a set
 
@@ -1555,14 +1826,41 @@ tyCoVarsOfTypesList :: [Type] -> [TyCoVar]
 -- See Note [Free variables of types]
 tyCoVarsOfTypesList tys = fvVarList $ tyCoFVsOfTypes tys
 
+-- | The worker for `tyCoFVsOfType` and `tyCoFVsOfTypeList`.
+-- The previous implementation used `unionVarSet` which is O(n+m) and can
+-- make the function quadratic.
+-- It's exported, so that it can be composed with
+-- other functions that compute free variables.
+-- See Note [FV naming conventions] in FV.
+--
+-- Eta-expanded because that makes it run faster (apparently)
+-- See Note [FV eta expansion] in FV for explanation.
+tyCoFVsOfType :: Type -> FV
+-- See Note [Free variables of types]
+tyCoFVsOfType (TyVarTy v)        f bound_vars (acc_list, acc_set)
+  | not (f v) = (acc_list, acc_set)
+  | v `elemVarSet` bound_vars = (acc_list, acc_set)
+  | v `elemVarSet` acc_set = (acc_list, acc_set)
+  | otherwise = tyCoFVsOfType (tyVarKind v) f
+                               emptyVarSet   -- See Note [Closing over free variable kinds]
+                               (v:acc_list, extendVarSet acc_set v)
+tyCoFVsOfType (TyConApp _ tys)   f bound_vars acc = tyCoFVsOfTypes tys f bound_vars acc
+tyCoFVsOfType (LitTy {})         f bound_vars acc = emptyFV f bound_vars acc
+tyCoFVsOfType (AppTy fun arg)    f bound_vars acc = (tyCoFVsOfType fun `unionFV` tyCoFVsOfType arg) f bound_vars acc
+tyCoFVsOfType (FunTy arg res)    f bound_vars acc = (tyCoFVsOfType arg `unionFV` tyCoFVsOfType res) f bound_vars acc
+tyCoFVsOfType (ForAllTy bndr ty) f bound_vars acc = tyCoFVsBndr bndr (tyCoFVsOfType ty)  f bound_vars acc
+tyCoFVsOfType (CastTy ty co)     f bound_vars acc = (tyCoFVsOfType ty `unionFV` tyCoFVsOfCo co) f bound_vars acc
+tyCoFVsOfType (CoercionTy co)    f bound_vars acc = tyCoFVsOfCo co f bound_vars acc
+
+tyCoFVsBndr :: TyCoVarBinder -> FV -> FV
+-- Free vars of (forall b. <thing with fvs>)
+tyCoFVsBndr (Bndr tv _) fvs = (delFV tv fvs)
+                              `unionFV` tyCoFVsOfType (varType tv)
+
 tyCoFVsOfTypes :: [Type] -> FV
 -- See Note [Free variables of types]
 tyCoFVsOfTypes (ty:tys) fv_cand in_scope acc = (tyCoFVsOfType ty `unionFV` tyCoFVsOfTypes tys) fv_cand in_scope acc
 tyCoFVsOfTypes []       fv_cand in_scope acc = emptyFV fv_cand in_scope acc
-
-tyCoVarsOfCo :: Coercion -> TyCoVarSet
--- See Note [Free variables of types]
-tyCoVarsOfCo co = fvVarSet $ tyCoFVsOfCo co
 
 -- | Get a deterministic set of the vars free in a coercion
 tyCoVarsOfCoDSet :: Coercion -> DTyCoVarSet
@@ -1573,10 +1871,22 @@ tyCoVarsOfCoList :: Coercion -> [TyCoVar]
 -- See Note [Free variables of types]
 tyCoVarsOfCoList co = fvVarList $ tyCoFVsOfCo co
 
+tyCoFVsOfMCo :: MCoercion -> FV
+tyCoFVsOfMCo MRefl    = emptyFV
+tyCoFVsOfMCo (MCo co) = tyCoFVsOfCo co
+
+tyCoVarsOfCosSet :: CoVarEnv Coercion -> TyCoVarSet
+tyCoVarsOfCosSet cos = tyCoVarsOfCos $ nonDetEltsUFM cos
+  -- It's OK to use nonDetEltsUFM here because we immediately forget the
+  -- ordering by returning a set
+
 tyCoFVsOfCo :: Coercion -> FV
 -- Extracts type and coercion variables from a coercion
 -- See Note [Free variables of types]
-tyCoFVsOfCo (Refl _ ty)         fv_cand in_scope acc = tyCoFVsOfType ty fv_cand in_scope acc
+tyCoFVsOfCo (Refl ty) fv_cand in_scope acc
+  = tyCoFVsOfType ty fv_cand in_scope acc
+tyCoFVsOfCo (GRefl _ ty mco) fv_cand in_scope acc
+  = (tyCoFVsOfType ty `unionFV` tyCoFVsOfMCo mco) fv_cand in_scope acc
 tyCoFVsOfCo (TyConAppCo _ _ cos) fv_cand in_scope acc = tyCoFVsOfCos cos fv_cand in_scope acc
 tyCoFVsOfCo (AppCo co arg) fv_cand in_scope acc
   = (tyCoFVsOfCo co `unionFV` tyCoFVsOfCo arg) fv_cand in_scope acc
@@ -1598,7 +1908,6 @@ tyCoFVsOfCo (TransCo co1 co2)   fv_cand in_scope acc = (tyCoFVsOfCo co1 `unionFV
 tyCoFVsOfCo (NthCo _ _ co)      fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (LRCo _ co)         fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (InstCo co arg)     fv_cand in_scope acc = (tyCoFVsOfCo co `unionFV` tyCoFVsOfCo arg) fv_cand in_scope acc
-tyCoFVsOfCo (CoherenceCo c1 c2) fv_cand in_scope acc = (tyCoFVsOfCo c1 `unionFV` tyCoFVsOfCo c2) fv_cand in_scope acc
 tyCoFVsOfCo (KindCo co)         fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (SubCo co)          fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (AxiomRuleCo _ cs)  fv_cand in_scope acc = tyCoFVsOfCos cs fv_cand in_scope acc
@@ -1607,110 +1916,154 @@ tyCoFVsOfCoVar :: CoVar -> FV
 tyCoFVsOfCoVar v fv_cand in_scope acc
   = (unitFV v `unionFV` tyCoFVsOfType (varType v)) fv_cand in_scope acc
 
-tyCoVarsOfProv :: UnivCoProvenance -> TyCoVarSet
-tyCoVarsOfProv prov = fvVarSet $ tyCoFVsOfProv prov
-
 tyCoFVsOfProv :: UnivCoProvenance -> FV
 tyCoFVsOfProv UnsafeCoerceProv    fv_cand in_scope acc = emptyFV fv_cand in_scope acc
 tyCoFVsOfProv (PhantomProv co)    fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfProv (ProofIrrelProv co) fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfProv (PluginProv _)      fv_cand in_scope acc = emptyFV fv_cand in_scope acc
 
-tyCoVarsOfCos :: [Coercion] -> TyCoVarSet
-tyCoVarsOfCos cos = fvVarSet $ tyCoFVsOfCos cos
-
-tyCoVarsOfCosSet :: CoVarEnv Coercion -> TyCoVarSet
-tyCoVarsOfCosSet cos = fvVarSet $ tyCoFVsOfCos $ nonDetEltsUFM cos
-  -- It's OK to use nonDetEltsUFM here because we immediately forget the
-  -- ordering by returning a set
-
 tyCoFVsOfCos :: [Coercion] -> FV
 tyCoFVsOfCos []       fv_cand in_scope acc = emptyFV fv_cand in_scope acc
 tyCoFVsOfCos (co:cos) fv_cand in_scope acc = (tyCoFVsOfCo co `unionFV` tyCoFVsOfCos cos) fv_cand in_scope acc
 
+
+------------- Extracting the CoVars of a type or coercion -----------
+
+{-
+
+Note [CoVarsOfX and the InterestingVarFun]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The coVarsOfType, coVarsOfTypes, coVarsOfCo, and coVarsOfCos functions are
+implemented in terms of the respective FV equivalents (tyCoFVsOf...), rather
+than the VarSet-based flavors (tyCoVarsOf...), despite the performance
+considerations outlined in Note [Free variables of types].
+
+This is because FV includes the InterestingVarFun, which is useful here,
+because we can cleverly use it to restrict our calculations to CoVars - this
+is what getCoVarSet achieves.
+
+See Trac #14880.
+
+-}
+
+getCoVarSet :: FV -> CoVarSet
+getCoVarSet fv = snd (fv isCoVar emptyVarSet ([], emptyVarSet))
+
 coVarsOfType :: Type -> CoVarSet
-coVarsOfType (TyVarTy v)         = coVarsOfType (tyVarKind v)
-coVarsOfType (TyConApp _ tys)    = coVarsOfTypes tys
-coVarsOfType (LitTy {})          = emptyVarSet
-coVarsOfType (AppTy fun arg)     = coVarsOfType fun `unionVarSet` coVarsOfType arg
-coVarsOfType (FunTy arg res)     = coVarsOfType arg `unionVarSet` coVarsOfType res
-coVarsOfType (ForAllTy (TvBndr tv _) ty)
-  = (coVarsOfType ty `delVarSet` tv)
-    `unionVarSet` coVarsOfType (tyVarKind tv)
-coVarsOfType (CastTy ty co)      = coVarsOfType ty `unionVarSet` coVarsOfCo co
-coVarsOfType (CoercionTy co)     = coVarsOfCo co
+coVarsOfType ty = getCoVarSet (tyCoFVsOfType ty)
 
 coVarsOfTypes :: [Type] -> TyCoVarSet
-coVarsOfTypes tys = mapUnionVarSet coVarsOfType tys
+coVarsOfTypes tys = getCoVarSet (tyCoFVsOfTypes tys)
 
 coVarsOfCo :: Coercion -> CoVarSet
--- Extract *coercion* variables only.  Tiresome to repeat the code, but easy.
-coVarsOfCo (Refl _ ty)         = coVarsOfType ty
-coVarsOfCo (TyConAppCo _ _ args) = coVarsOfCos args
-coVarsOfCo (AppCo co arg)      = coVarsOfCo co `unionVarSet` coVarsOfCo arg
-coVarsOfCo (ForAllCo tv kind_co co)
-  = coVarsOfCo co `delVarSet` tv `unionVarSet` coVarsOfCo kind_co
-coVarsOfCo (FunCo _ co1 co2)    = coVarsOfCo co1 `unionVarSet` coVarsOfCo co2
-coVarsOfCo (CoVarCo v)          = coVarsOfCoVar v
-coVarsOfCo (HoleCo h)           = coVarsOfCoVar (coHoleCoVar h)
-                                  -- See Note [CoercionHoles and coercion free variables]
-coVarsOfCo (AxiomInstCo _ _ as) = coVarsOfCos as
-coVarsOfCo (UnivCo p _ t1 t2)   = coVarsOfProv p `unionVarSet` coVarsOfTypes [t1, t2]
-coVarsOfCo (SymCo co)           = coVarsOfCo co
-coVarsOfCo (TransCo co1 co2)    = coVarsOfCo co1 `unionVarSet` coVarsOfCo co2
-coVarsOfCo (NthCo _ _ co)       = coVarsOfCo co
-coVarsOfCo (LRCo _ co)          = coVarsOfCo co
-coVarsOfCo (InstCo co arg)      = coVarsOfCo co `unionVarSet` coVarsOfCo arg
-coVarsOfCo (CoherenceCo c1 c2)  = coVarsOfCos [c1, c2]
-coVarsOfCo (KindCo co)          = coVarsOfCo co
-coVarsOfCo (SubCo co)           = coVarsOfCo co
-coVarsOfCo (AxiomRuleCo _ cs)   = coVarsOfCos cs
-
-coVarsOfCoVar :: CoVar -> CoVarSet
-coVarsOfCoVar v = unitVarSet v `unionVarSet` coVarsOfType (varType v)
-
-coVarsOfProv :: UnivCoProvenance -> CoVarSet
-coVarsOfProv UnsafeCoerceProv    = emptyVarSet
-coVarsOfProv (PhantomProv co)    = coVarsOfCo co
-coVarsOfProv (ProofIrrelProv co) = coVarsOfCo co
-coVarsOfProv (PluginProv _)      = emptyVarSet
+coVarsOfCo co = getCoVarSet (tyCoFVsOfCo co)
 
 coVarsOfCos :: [Coercion] -> CoVarSet
-coVarsOfCos cos = mapUnionVarSet coVarsOfCo cos
+coVarsOfCos cos = getCoVarSet (tyCoFVsOfCos cos)
 
--- | Add the kind variables free in the kinds of the tyvars in the given set.
--- Returns a non-deterministic set.
-closeOverKinds :: TyVarSet -> TyVarSet
-closeOverKinds = fvVarSet . closeOverKindsFV . nonDetEltsUniqSet
-  -- It's OK to use nonDetEltsUniqSet here because we immediately forget
-  -- about the ordering by returning a set.
+----- Whether a covar is /Almost Devoid/ in a type or coercion ----
 
--- | Given a list of tyvars returns a deterministic FV computation that
--- returns the given tyvars with the kind variables free in the kinds of the
--- given tyvars.
-closeOverKindsFV :: [TyVar] -> FV
-closeOverKindsFV tvs =
-  mapUnionFV (tyCoFVsOfType . tyVarKind) tvs `unionFV` mkFVs tvs
+-- | Given a covar and a coercion, returns True if covar is almost devoid in
+-- the coercion. That is, covar can only appear in Refl and GRefl.
+-- See last wrinkle in Note [Unused coercion variable in ForAllCo] in Coercion
+almostDevoidCoVarOfCo :: CoVar -> Coercion -> Bool
+almostDevoidCoVarOfCo cv co =
+  almost_devoid_co_var_of_co co cv
 
--- | Add the kind variables free in the kinds of the tyvars in the given set.
--- Returns a deterministically ordered list.
-closeOverKindsList :: [TyVar] -> [TyVar]
-closeOverKindsList tvs = fvVarList $ closeOverKindsFV tvs
+almost_devoid_co_var_of_co :: Coercion -> CoVar -> Bool
+almost_devoid_co_var_of_co (Refl {}) _ = True   -- covar is allowed in Refl and
+almost_devoid_co_var_of_co (GRefl {}) _ = True  -- GRefl, so we don't look into
+                                                -- the coercions
+almost_devoid_co_var_of_co (TyConAppCo _ _ cos) cv
+  = almost_devoid_co_var_of_cos cos cv
+almost_devoid_co_var_of_co (AppCo co arg) cv
+  = almost_devoid_co_var_of_co co cv
+  && almost_devoid_co_var_of_co arg cv
+almost_devoid_co_var_of_co (ForAllCo v kind_co co) cv
+  = almost_devoid_co_var_of_co kind_co cv
+  && (v == cv || almost_devoid_co_var_of_co co cv)
+almost_devoid_co_var_of_co (FunCo _ co1 co2) cv
+  = almost_devoid_co_var_of_co co1 cv
+  && almost_devoid_co_var_of_co co2 cv
+almost_devoid_co_var_of_co (CoVarCo v) cv = v /= cv
+almost_devoid_co_var_of_co (HoleCo h)  cv = (coHoleCoVar h) /= cv
+almost_devoid_co_var_of_co (AxiomInstCo _ _ cos) cv
+  = almost_devoid_co_var_of_cos cos cv
+almost_devoid_co_var_of_co (UnivCo p _ t1 t2) cv
+  = almost_devoid_co_var_of_prov p cv
+  && almost_devoid_co_var_of_type t1 cv
+  && almost_devoid_co_var_of_type t2 cv
+almost_devoid_co_var_of_co (SymCo co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_co (TransCo co1 co2) cv
+  = almost_devoid_co_var_of_co co1 cv
+  && almost_devoid_co_var_of_co co2 cv
+almost_devoid_co_var_of_co (NthCo _ _ co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_co (LRCo _ co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_co (InstCo co arg) cv
+  = almost_devoid_co_var_of_co co cv
+  && almost_devoid_co_var_of_co arg cv
+almost_devoid_co_var_of_co (KindCo co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_co (SubCo co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_co (AxiomRuleCo _ cs) cv
+  = almost_devoid_co_var_of_cos cs cv
 
--- | Add the kind variables free in the kinds of the tyvars in the given set.
--- Returns a deterministic set.
-closeOverKindsDSet :: DTyVarSet -> DTyVarSet
-closeOverKindsDSet = fvDVarSet . closeOverKindsFV . dVarSetElems
+almost_devoid_co_var_of_cos :: [Coercion] -> CoVar -> Bool
+almost_devoid_co_var_of_cos [] _ = True
+almost_devoid_co_var_of_cos (co:cos) cv
+  = almost_devoid_co_var_of_co co cv
+  && almost_devoid_co_var_of_cos cos cv
+
+almost_devoid_co_var_of_prov :: UnivCoProvenance -> CoVar -> Bool
+almost_devoid_co_var_of_prov (PhantomProv co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_prov (ProofIrrelProv co) cv
+  = almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_prov UnsafeCoerceProv _ = True
+almost_devoid_co_var_of_prov (PluginProv _) _ = True
+
+almost_devoid_co_var_of_type :: Type -> CoVar -> Bool
+almost_devoid_co_var_of_type (TyVarTy _) _ = True
+almost_devoid_co_var_of_type (TyConApp _ tys) cv
+  = almost_devoid_co_var_of_types tys cv
+almost_devoid_co_var_of_type (LitTy {}) _ = True
+almost_devoid_co_var_of_type (AppTy fun arg) cv
+  = almost_devoid_co_var_of_type fun cv
+  && almost_devoid_co_var_of_type arg cv
+almost_devoid_co_var_of_type (FunTy arg res) cv
+  = almost_devoid_co_var_of_type arg cv
+  && almost_devoid_co_var_of_type res cv
+almost_devoid_co_var_of_type (ForAllTy (Bndr v _) ty) cv
+  = almost_devoid_co_var_of_type (varType v) cv
+  && (v == cv || almost_devoid_co_var_of_type ty cv)
+almost_devoid_co_var_of_type (CastTy ty co) cv
+  = almost_devoid_co_var_of_type ty cv
+  && almost_devoid_co_var_of_co co cv
+almost_devoid_co_var_of_type (CoercionTy co) cv
+  = almost_devoid_co_var_of_co co cv
+
+almost_devoid_co_var_of_types :: [Type] -> CoVar -> Bool
+almost_devoid_co_var_of_types [] _ = True
+almost_devoid_co_var_of_types (ty:tys) cv
+  = almost_devoid_co_var_of_type ty cv
+  && almost_devoid_co_var_of_types tys cv
+
+------------- Injective free vars -----------------
 
 -- | Returns the free variables of a 'TyConBinder' that are in injective
 -- positions. (See @Note [Kind annotations on TyConApps]@ in "TcSplice" for an
 -- explanation of what an injective position is.)
 injectiveVarsOfBinder :: TyConBinder -> FV
-injectiveVarsOfBinder (TvBndr tv vis) =
+injectiveVarsOfBinder (Bndr tv vis) =
   case vis of
-    AnonTCB           -> injectiveVarsOfType (tyVarKind tv)
+    AnonTCB           -> injectiveVarsOfType (varType tv)
     NamedTCB Required -> unitFV tv `unionFV`
-                         injectiveVarsOfType (tyVarKind tv)
+                         injectiveVarsOfType (varType tv)
     NamedTCB _        -> emptyFV
 
 -- | Returns the free variables of a 'Type' that are in injective positions.
@@ -1731,11 +2084,13 @@ injectiveVarsOfType = go
                          filterByList (inj ++ repeat True) tys
                          -- Oversaturated arguments to a tycon are
                          -- always injective, hence the repeat True
-    go (ForAllTy tvb ty) = tyCoFVsBndr tvb $ go (tyVarKind (binderVar tvb))
+    go (ForAllTy tvb ty) = tyCoFVsBndr tvb $ go (binderType tvb)
                                              `unionFV` go ty
     go LitTy{}           = emptyFV
     go (CastTy ty _)     = go ty
     go CoercionTy{}      = emptyFV
+
+------------- No free vars -----------------
 
 -- | Returns True if this type has no free variables. Should be the same as
 -- isEmptyVarSet . tyCoVarsOfType, but faster in the non-forall case.
@@ -1749,10 +2104,18 @@ noFreeVarsOfType (LitTy _)        = True
 noFreeVarsOfType (CastTy ty co)   = noFreeVarsOfType ty && noFreeVarsOfCo co
 noFreeVarsOfType (CoercionTy co)  = noFreeVarsOfCo co
 
+noFreeVarsOfMCo :: MCoercion -> Bool
+noFreeVarsOfMCo MRefl    = True
+noFreeVarsOfMCo (MCo co) = noFreeVarsOfCo co
+
+noFreeVarsOfTypes :: [Type] -> Bool
+noFreeVarsOfTypes = all noFreeVarsOfType
+
 -- | Returns True if this coercion has no free variables. Should be the same as
 -- isEmptyVarSet . tyCoVarsOfCo, but faster in the non-forall case.
 noFreeVarsOfCo :: Coercion -> Bool
-noFreeVarsOfCo (Refl _ ty)            = noFreeVarsOfType ty
+noFreeVarsOfCo (Refl ty)              = noFreeVarsOfType ty
+noFreeVarsOfCo (GRefl _ ty co)        = noFreeVarsOfType ty && noFreeVarsOfMCo co
 noFreeVarsOfCo (TyConAppCo _ _ args)  = all noFreeVarsOfCo args
 noFreeVarsOfCo (AppCo c1 c2)          = noFreeVarsOfCo c1 && noFreeVarsOfCo c2
 noFreeVarsOfCo co@(ForAllCo {})       = isEmptyVarSet (tyCoVarsOfCo co)
@@ -1768,7 +2131,6 @@ noFreeVarsOfCo (TransCo co1 co2)      = noFreeVarsOfCo co1 && noFreeVarsOfCo co2
 noFreeVarsOfCo (NthCo _ _ co)         = noFreeVarsOfCo co
 noFreeVarsOfCo (LRCo _ co)            = noFreeVarsOfCo co
 noFreeVarsOfCo (InstCo co1 co2)       = noFreeVarsOfCo co1 && noFreeVarsOfCo co2
-noFreeVarsOfCo (CoherenceCo co1 co2)  = noFreeVarsOfCo co1 && noFreeVarsOfCo co2
 noFreeVarsOfCo (KindCo co)            = noFreeVarsOfCo co
 noFreeVarsOfCo (SubCo co)             = noFreeVarsOfCo co
 noFreeVarsOfCo (AxiomRuleCo _ cs)     = all noFreeVarsOfCo cs
@@ -1807,7 +2169,7 @@ data TCvSubst
   = TCvSubst InScopeSet -- The in-scope type and kind variables
              TvSubstEnv -- Substitutes both type and kind variables
              CvSubstEnv -- Substitutes coercion variables
-        -- See Note [Apply Once]
+        -- See Note [Substitutions apply only once]
         -- and Note [Extending the TvSubstEnv]
         -- and Note [Substituting types and coercions]
         -- and Note [The substitution invariant]
@@ -1815,21 +2177,51 @@ data TCvSubst
 -- | A substitution of 'Type's for 'TyVar's
 --                 and 'Kind's for 'KindVar's
 type TvSubstEnv = TyVarEnv Type
-        -- A TvSubstEnv is used both inside a TCvSubst (with the apply-once
-        -- invariant discussed in Note [Apply Once]), and also independently
-        -- in the middle of matching, and unification (see Types.Unify)
-        -- So you have to look at the context to know if it's idempotent or
-        -- apply-once or whatever
+  -- NB: A TvSubstEnv is used
+  --   both inside a TCvSubst (with the apply-once invariant
+  --        discussed in Note [Substitutions apply only once],
+  --   and  also independently in the middle of matching,
+  --        and unification (see Types.Unify).
+  -- So you have to look at the context to know if it's idempotent or
+  -- apply-once or whatever
 
 -- | A substitution of 'Coercion's for 'CoVar's
 type CvSubstEnv = CoVarEnv Coercion
 
-{-
-Note [Apply Once]
-~~~~~~~~~~~~~~~~~
+{- Note [The substitution invariant]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When calling (substTy subst ty) it should be the case that
+the in-scope set in the substitution is a superset of both:
+
+  (SIa) The free vars of the range of the substitution
+  (SIb) The free vars of ty minus the domain of the substitution
+
+The same rules apply to other substitutions (notably CoreSubst.Subst)
+
+* Reason for (SIa). Consider
+      substTy [a :-> Maybe b] (forall b. b->a)
+  we must rename the forall b, to get
+      forall b2. b2 -> Maybe b
+  Making 'b' part of the in-scope set forces this renaming to
+  take place.
+
+* Reason for (SIb). Consider
+     substTy [a :-> Maybe b] (forall b. (a,b,x))
+  Then if we use the in-scope set {b}, satisfying (SIa), there is
+  a danger we will rename the forall'd variable to 'x' by mistake,
+  getting this:
+      forall x. (Maybe b, x, x)
+  Breaking (SIb) caused the bug from #11371.
+
+Note: if the free vars of the range of the substitution are freshly created,
+then the problems of (SIa) can't happen, and so it would be sound to
+ignore (SIa).
+
+Note [Substitutions apply only once]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We use TCvSubsts to instantiate things, and we might instantiate
         forall a b. ty
-\with the types
+with the types
         [a, b], or [b, a].
 So the substitution might go [a->b, b->a].  A similar situation arises in Core
 when we find a beta redex like
@@ -1837,9 +2229,9 @@ when we find a beta redex like
 Then we also end up with a substitution that permutes type variables. Other
 variations happen to; for example [a -> (a, b)].
 
-        ****************************************************
-        *** So a TCvSubst must be applied precisely once ***
-        ****************************************************
+        ********************************************************
+        *** So a substitution must be applied precisely once ***
+        ********************************************************
 
 A TCvSubst is not idempotent, but, unlike the non-idempotent substitution
 we use during unifications, it must not be repeatedly applied.
@@ -1859,7 +2251,7 @@ nevertheless we add 'b' to the TvSubstEnv, because b's kind does change
 
 This invariant has several crucial consequences:
 
-* In substTyVarBndr, we need extend the TvSubstEnv
+* In substVarBndr, we need extend the TvSubstEnv
         - if the unique has changed
         - or if the kind has changed
 
@@ -1882,25 +2274,6 @@ Note that the TvSubstEnv should *never* map a CoVar (built with the Id
 constructor) and the CvSubstEnv should *never* map a TyVar. Furthermore,
 the range of the TvSubstEnv should *never* include a type headed with
 CoercionTy.
-
-Note [The substitution invariant]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-When calling (substTy subst ty) it should be the case that
-the in-scope set in the substitution is a superset of both:
-
-  * The free vars of the range of the substitution
-  * The free vars of ty minus the domain of the substitution
-
-If we want to substitute [a -> ty1, b -> ty2] I used to
-think it was enough to generate an in-scope set that includes
-fv(ty1,ty2).  But that's not enough; we really should also take the
-free vars of the type we are substituting into!  Example:
-     (forall b. (a,b,x)) [a -> List b]
-Then if we use the in-scope set {b}, there is a danger we will rename
-the forall'd variable to 'x' by mistake, getting this:
-     (forall x. (List b, x, x))
-
-Breaking this invariant caused the bug from #11371.
 -}
 
 emptyTvSubstEnv :: TvSubstEnv
@@ -1951,6 +2324,10 @@ mkTCvSubst in_scope (tenv, cenv) = TCvSubst in_scope tenv cenv
 mkTvSubst :: InScopeSet -> TvSubstEnv -> TCvSubst
 -- ^ Make a TCvSubst with specified tyvar subst and empty covar subst
 mkTvSubst in_scope tenv = TCvSubst in_scope tenv emptyCvSubstEnv
+
+mkCvSubst :: InScopeSet -> CvSubstEnv -> TCvSubst
+-- ^ Make a TCvSubst with specified covar subst and empty tyvar subst
+mkCvSubst in_scope cenv = TCvSubst in_scope emptyTvSubstEnv cenv
 
 getTvSubstEnv :: TCvSubst -> TvSubstEnv
 getTvSubstEnv (TCvSubst _ env _) = env
@@ -2010,13 +2387,19 @@ extendTCvSubst subst v ty
   | otherwise
   = pprPanic "extendTCvSubst" (ppr v <+> text "|->" <+> ppr ty)
 
+extendTCvSubstWithClone :: TCvSubst -> TyCoVar -> TyCoVar -> TCvSubst
+extendTCvSubstWithClone subst tcv
+  | isTyVar tcv = extendTvSubstWithClone subst tcv
+  | otherwise   = extendCvSubstWithClone subst tcv
+
 extendTvSubst :: TCvSubst -> TyVar -> Type -> TCvSubst
 extendTvSubst (TCvSubst in_scope tenv cenv) tv ty
   = TCvSubst in_scope (extendVarEnv tenv tv ty) cenv
 
-extendTvSubstBinderAndInScope :: TCvSubst -> TyBinder -> Type -> TCvSubst
-extendTvSubstBinderAndInScope subst (Named bndr) ty
-  = extendTvSubstAndInScope subst (binderVar bndr) ty
+extendTvSubstBinderAndInScope :: TCvSubst -> TyCoBinder -> Type -> TCvSubst
+extendTvSubstBinderAndInScope subst (Named (Bndr v _)) ty
+  = ASSERT( isTyVar v )
+    extendTvSubstAndInScope subst v ty
 extendTvSubstBinderAndInScope subst (Anon _)     _
   = subst
 
@@ -2052,6 +2435,10 @@ extendTvSubstList :: TCvSubst -> [Var] -> [Type] -> TCvSubst
 extendTvSubstList subst tvs tys
   = foldl2 extendTvSubst subst tvs tys
 
+extendTCvSubstList :: TCvSubst -> [Var] -> [Type] -> TCvSubst
+extendTCvSubstList subst tvs tys
+  = foldl2 extendTCvSubst subst tvs tys
+
 unionTCvSubst :: TCvSubst -> TCvSubst -> TCvSubst
 -- Works when the ranges are disjoint
 unionTCvSubst (TCvSubst in_scope1 tenv1 cenv1) (TCvSubst in_scope2 tenv2 cenv2)
@@ -2064,12 +2451,6 @@ unionTCvSubst (TCvSubst in_scope1 tenv1 cenv1) (TCvSubst in_scope2 tenv2 cenv2)
 -- mkTvSubstPrs and zipTvSubst generate the in-scope set from
 -- the types given; but it's just a thunk so with a bit of luck
 -- it'll never be evaluated
-
--- | Generates an in-scope set from the free variables in a list of types
--- and a list of coercions
-mkTyCoInScopeSet :: [Type] -> [Coercion] -> InScopeSet
-mkTyCoInScopeSet tys cos
-  = mkInScopeSet (tyCoVarsOfTypes tys `unionVarSet` tyCoVarsOfCos cos)
 
 -- | Generates the in-scope set for the 'TCvSubst' from the types in the incoming
 -- environment. No CoVars, please!
@@ -2094,6 +2475,18 @@ zipCvSubst cvs cos
   = TCvSubst (mkInScopeSet (tyCoVarsOfCos cos)) emptyTvSubstEnv cenv
   where
     cenv = zipCoEnv cvs cos
+
+zipTCvSubst :: [TyCoVar] -> [Type] -> TCvSubst
+zipTCvSubst tcvs tys
+  | debugIsOn
+  , neLength tcvs tys
+  = pprTrace "zipTCvSubst" (ppr tcvs $$ ppr tys) emptyTCvSubst
+  | otherwise
+  = zip_tcvsubst tcvs tys (mkEmptyTCvSubst $ mkInScopeSet (tyCoVarsOfTypes tys))
+  where zip_tcvsubst :: [TyCoVar] -> [Type] -> TCvSubst -> TCvSubst
+        zip_tcvsubst (tv:tvs) (ty:tys) subst
+          = zip_tcvsubst tvs tys (extendTCvSubst subst tv ty)
+        zip_tcvsubst _ _ subst = subst -- empty case
 
 -- | Generates the in-scope set for the 'TCvSubst' from the types in the
 -- incoming environment. No CoVars, please!
@@ -2181,6 +2574,34 @@ sym (ForAllCo tv h g)
 ==>
 ForAllCo tv (sym h) (sym g[tv |-> tv |> sym h])
 
+Note [Substituting in a coercion hole]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+It seems highly suspicious to be substituting in a coercion that still
+has coercion holes. Yet, this can happen in a situation like this:
+
+  f :: forall k. k :~: Type -> ()
+  f Refl = let x :: forall (a :: k). [a] -> ...
+               x = ...
+
+When we check x's type signature, we require that k ~ Type. We indeed
+know this due to the Refl pattern match, but the eager unifier can't
+make use of givens. So, when we're done looking at x's type, a coercion
+hole will remain. Then, when we're checking x's definition, we skolemise
+x's type (in order to, e.g., bring the scoped type variable `a` into scope).
+This requires performing a substitution for the fresh skolem variables.
+
+This subsitution needs to affect the kind of the coercion hole, too --
+otherwise, the kind will have an out-of-scope variable in it. More problematically
+in practice (we won't actually notice the out-of-scope variable ever), skolems
+in the kind might have too high a level, triggering a failure to uphold the
+invariant that no free variables in a type have a higher level than the
+ambient level in the type checker. In the event of having free variables in the
+hole's kind, I'm pretty sure we'll always have an erroneous program, so we
+don't need to worry what will happen when the hole gets filled in. After all,
+a hole relating a locally-bound type variable will be unable to be solved. This
+is why it's OK not to look through the IORef of a coercion hole during
+substitution.
+
 -}
 
 -- | Type substitution, see 'zipTvSubst'
@@ -2267,17 +2688,15 @@ isValidTCvSubst (TCvSubst in_scope tenv cenv) =
 checkValidSubst :: HasCallStack => TCvSubst -> [Type] -> [Coercion] -> a -> a
 checkValidSubst subst@(TCvSubst in_scope tenv cenv) tys cos a
 -- TODO (RAE): Change back to ASSERT
-  = WARN( not ({-#SCC "isValidTCvSubst" #-} isValidTCvSubst subst),
+  = WARN( not (isValidTCvSubst subst),
              text "in_scope" <+> ppr in_scope $$
              text "tenv" <+> ppr tenv $$
-             text "tenvFVs"
-               <+> ppr (tyCoVarsOfTypesSet tenv) $$
+             text "tenvFVs" <+> ppr (tyCoVarsOfTypesSet tenv) $$
              text "cenv" <+> ppr cenv $$
-             text "cenvFVs"
-               <+> ppr (tyCoVarsOfCosSet cenv) $$
+             text "cenvFVs" <+> ppr (tyCoVarsOfCosSet cenv) $$
              text "tys" <+> ppr tys $$
              text "cos" <+> ppr cos )
-    WARN( not ({-#SCC "tysCosFVsInScope" #-} tysCosFVsInScope),
+    WARN( not tysCosFVsInScope,
              text "in_scope" <+> ppr in_scope $$
              text "tenv" <+> ppr tenv $$
              text "cenv" <+> ppr cenv $$
@@ -2362,10 +2781,10 @@ subst_ty subst ty
     go (TyConApp tc tys) = let args = map go tys
                            in  args `seqList` TyConApp tc args
     go (FunTy arg res)   = (FunTy $! go arg) $! go res
-    go (ForAllTy (TvBndr tv vis) ty)
-                         = case substTyVarBndrUnchecked subst tv of
+    go (ForAllTy (Bndr tv vis) ty)
+                         = case substVarBndrUnchecked subst tv of
                              (subst', tv') ->
-                               (ForAllTy $! ((TvBndr $! tv') vis)) $!
+                               (ForAllTy $! ((Bndr $! tv') vis)) $!
                                             (subst_ty subst' ty)
     go (LitTy n)         = LitTy $! n
     go (CastTy ty co)    = (mkCastTy $! (go ty)) $! (subst_co subst co)
@@ -2380,6 +2799,14 @@ substTyVar (TCvSubst _ tenv _) tv
 
 substTyVars :: TCvSubst -> [TyVar] -> [Type]
 substTyVars subst = map $ substTyVar subst
+
+substTyCoVars :: TCvSubst -> [TyCoVar] -> [Type]
+substTyCoVars subst = map $ substTyCoVar subst
+
+substTyCoVar :: TCvSubst -> TyCoVar -> Type
+substTyCoVar subst tv
+  | isTyVar tv = substTyVar subst tv
+  | otherwise = CoercionTy $ substCoVar subst tv
 
 lookupTyVar :: TCvSubst -> TyVar  -> Maybe Type
         -- See Note [Extending the TCvSubst]
@@ -2420,14 +2847,20 @@ subst_co subst co
     go_ty :: Type -> Type
     go_ty = subst_ty subst
 
+    go_mco :: MCoercion -> MCoercion
+    go_mco MRefl    = MRefl
+    go_mco (MCo co) = MCo (go co)
+
     go :: Coercion -> Coercion
-    go (Refl r ty)           = mkReflCo r $! go_ty ty
+    go (Refl ty)             = mkNomReflCo $! (go_ty ty)
+    go (GRefl r ty mco)      = (mkGReflCo r $! (go_ty ty)) $! (go_mco mco)
     go (TyConAppCo r tc args)= let args' = map go args
                                in  args' `seqList` mkTyConAppCo r tc args'
     go (AppCo co arg)        = (mkAppCo $! go co) $! go arg
     go (ForAllCo tv kind_co co)
-      = case substForAllCoBndrUnchecked subst tv kind_co of { (subst', tv', kind_co') ->
-          ((mkForAllCo $! tv') $! kind_co') $! subst_co subst' co }
+      = case substForAllCoBndrUnchecked subst tv kind_co of
+         (subst', tv', kind_co') ->
+          ((mkForAllCo $! tv') $! kind_co') $! subst_co subst' co
     go (FunCo r co1 co2)     = (mkFunCo r $! go co1) $! go co2
     go (CoVarCo cv)          = substCoVar subst cv
     go (AxiomInstCo con ind cos) = mkAxiomInstCo con ind $! map go cos
@@ -2438,45 +2871,52 @@ subst_co subst co
     go (NthCo r d co)        = mkNthCo r d $! (go co)
     go (LRCo lr co)          = mkLRCo lr $! (go co)
     go (InstCo co arg)       = (mkInstCo $! (go co)) $! go arg
-    go (CoherenceCo co1 co2) = (mkCoherenceCo $! (go co1)) $! (go co2)
     go (KindCo co)           = mkKindCo $! (go co)
     go (SubCo co)            = mkSubCo $! (go co)
     go (AxiomRuleCo c cs)    = let cs1 = map go cs
                                 in cs1 `seqList` AxiomRuleCo c cs1
-    go (HoleCo h)            = HoleCo h
-      -- NB: this last case is a little suspicious, but we need it. Originally,
-      -- there was a panic here, but it triggered from deeplySkolemise. Because
-      -- we only skolemise tyvars that are manually bound, this operation makes
-      -- sense, even over a coercion with holes.  We don't need to substitute
-      -- in the type of the coHoleCoVar because it wouldn't makes sense to have
-      --    forall a. ....(ty |> {hole_cv::a})....
+    go (HoleCo h)            = HoleCo $! go_hole h
 
     go_prov UnsafeCoerceProv     = UnsafeCoerceProv
     go_prov (PhantomProv kco)    = PhantomProv (go kco)
     go_prov (ProofIrrelProv kco) = ProofIrrelProv (go kco)
     go_prov p@(PluginProv _)     = p
 
-substForAllCoBndr :: TCvSubst -> TyVar -> Coercion -> (TCvSubst, TyVar, Coercion)
+    -- See Note [Substituting in a coercion hole]
+    go_hole h@(CoercionHole { ch_co_var = cv })
+      = h { ch_co_var = updateVarType go_ty cv }
+
+substForAllCoBndr :: TCvSubst -> TyCoVar -> KindCoercion
+                  -> (TCvSubst, TyCoVar, Coercion)
 substForAllCoBndr subst
-  = substForAllCoBndrCallback False (substCo subst) subst
+  = substForAllCoBndrUsing False (substCo subst) subst
 
 -- | Like 'substForAllCoBndr', but disables sanity checks.
 -- The problems that the sanity checks in substCo catch are described in
 -- Note [The substitution invariant].
 -- The goal of #11371 is to migrate all the calls of substCoUnchecked to
 -- substCo and remove this function. Please don't use in new code.
-substForAllCoBndrUnchecked :: TCvSubst -> TyVar -> Coercion -> (TCvSubst, TyVar, Coercion)
+substForAllCoBndrUnchecked :: TCvSubst -> TyCoVar -> KindCoercion
+                           -> (TCvSubst, TyCoVar, Coercion)
 substForAllCoBndrUnchecked subst
-  = substForAllCoBndrCallback False (substCoUnchecked subst) subst
+  = substForAllCoBndrUsing False (substCoUnchecked subst) subst
 
 -- See Note [Sym and ForAllCo]
-substForAllCoBndrCallback :: Bool  -- apply sym to binder?
-                          -> (Coercion -> Coercion)  -- transformation to kind co
-                          -> TCvSubst -> TyVar -> Coercion
-                          -> (TCvSubst, TyVar, Coercion)
-substForAllCoBndrCallback sym sco (TCvSubst in_scope tenv cenv)
-                          old_var old_kind_co
-  = ( TCvSubst (in_scope `extendInScopeSet` new_var) new_env cenv
+substForAllCoBndrUsing :: Bool  -- apply sym to binder?
+                       -> (Coercion -> Coercion)  -- transformation to kind co
+                       -> TCvSubst -> TyCoVar -> KindCoercion
+                       -> (TCvSubst, TyCoVar, KindCoercion)
+substForAllCoBndrUsing sym sco subst old_var
+  | isTyVar old_var = substForAllCoTyVarBndrUsing sym sco subst old_var
+  | otherwise       = substForAllCoCoVarBndrUsing sym sco subst old_var
+
+substForAllCoTyVarBndrUsing :: Bool  -- apply sym to binder?
+                            -> (Coercion -> Coercion)  -- transformation to kind co
+                            -> TCvSubst -> TyVar -> KindCoercion
+                            -> (TCvSubst, TyVar, KindCoercion)
+substForAllCoTyVarBndrUsing sym sco (TCvSubst in_scope tenv cenv) old_var old_kind_co
+  = ASSERT( isTyVar old_var )
+    ( TCvSubst (in_scope `extendInScopeSet` new_var) new_env cenv
     , new_var, new_kind_co )
   where
     new_env | no_change && not sym = delVarEnv tenv old_var
@@ -2491,8 +2931,37 @@ substForAllCoBndrCallback sym sco (TCvSubst in_scope tenv cenv)
                 | otherwise      = sco old_kind_co
 
     Pair new_ki1 _ = coercionKind new_kind_co
+    -- We could do substitution to (tyVarKind old_var). We don't do so because
+    -- we already substituted new_kind_co, which contains the kind information
+    -- we want. We don't want to do substitution once more. Also, in most cases,
+    -- new_kind_co is a Refl, in which case coercionKind is really fast.
 
     new_var  = uniqAway in_scope (setTyVarKind old_var new_ki1)
+
+substForAllCoCoVarBndrUsing :: Bool  -- apply sym to binder?
+                            -> (Coercion -> Coercion)  -- transformation to kind co
+                            -> TCvSubst -> CoVar -> KindCoercion
+                            -> (TCvSubst, CoVar, KindCoercion)
+substForAllCoCoVarBndrUsing sym sco (TCvSubst in_scope tenv cenv)
+                            old_var old_kind_co
+  = ASSERT( isCoVar old_var )
+    ( TCvSubst (in_scope `extendInScopeSet` new_var) tenv new_cenv
+    , new_var, new_kind_co )
+  where
+    new_cenv | no_change && not sym = delVarEnv cenv old_var
+             | otherwise = extendVarEnv cenv old_var (mkCoVarCo new_var)
+
+    no_kind_change = noFreeVarsOfCo old_kind_co
+    no_change = no_kind_change && (new_var == old_var)
+
+    new_kind_co | no_kind_change = old_kind_co
+                | otherwise      = sco old_kind_co
+
+    Pair h1 h2 = coercionKind new_kind_co
+
+    new_var       = uniqAway in_scope $ mkCoVar (varName old_var) new_var_type
+    new_var_type  | sym       = h2
+                  | otherwise = h1
 
 substCoVar :: TCvSubst -> CoVar -> Coercion
 substCoVar (TCvSubst _ _ cenv) cv
@@ -2503,25 +2972,45 @@ substCoVar (TCvSubst _ _ cenv) cv
 substCoVars :: TCvSubst -> [CoVar] -> [Coercion]
 substCoVars subst cvs = map (substCoVar subst) cvs
 
-lookupCoVar :: TCvSubst -> Var  -> Maybe Coercion
+lookupCoVar :: TCvSubst -> Var -> Maybe Coercion
 lookupCoVar (TCvSubst _ _ cenv) v = lookupVarEnv cenv v
 
 substTyVarBndr :: HasCallStack => TCvSubst -> TyVar -> (TCvSubst, TyVar)
-substTyVarBndr = substTyVarBndrCallback substTy
+substTyVarBndr = substTyVarBndrUsing substTy
 
--- | Like 'substTyVarBndr' but disables sanity checks.
+substTyVarBndrs :: HasCallStack => TCvSubst -> [TyVar] -> (TCvSubst, [TyVar])
+substTyVarBndrs = mapAccumL substTyVarBndr
+
+substVarBndr :: HasCallStack => TCvSubst -> TyCoVar -> (TCvSubst, TyCoVar)
+substVarBndr = substVarBndrUsing substTy
+
+substVarBndrs :: HasCallStack => TCvSubst -> [TyCoVar] -> (TCvSubst, [TyCoVar])
+substVarBndrs = mapAccumL substVarBndr
+
+substCoVarBndr :: HasCallStack => TCvSubst -> CoVar -> (TCvSubst, CoVar)
+substCoVarBndr = substCoVarBndrUsing substTy
+
+-- | Like 'substVarBndr', but disables sanity checks.
 -- The problems that the sanity checks in substTy catch are described in
 -- Note [The substitution invariant].
 -- The goal of #11371 is to migrate all the calls of substTyUnchecked to
 -- substTy and remove this function. Please don't use in new code.
-substTyVarBndrUnchecked :: TCvSubst -> TyVar -> (TCvSubst, TyVar)
-substTyVarBndrUnchecked = substTyVarBndrCallback substTyUnchecked
+substVarBndrUnchecked :: TCvSubst -> TyCoVar -> (TCvSubst, TyCoVar)
+substVarBndrUnchecked = substVarBndrUsing substTyUnchecked
+
+substVarBndrUsing :: (TCvSubst -> Type -> Type)
+                  -> TCvSubst -> TyCoVar -> (TCvSubst, TyCoVar)
+substVarBndrUsing subst_fn subst v
+  | isTyVar v = substTyVarBndrUsing subst_fn subst v
+  | otherwise = substCoVarBndrUsing subst_fn subst v
 
 -- | Substitute a tyvar in a binding position, returning an
 -- extended subst and a new tyvar.
-substTyVarBndrCallback :: (TCvSubst -> Type -> Type)  -- ^ the subst function
-                       -> TCvSubst -> TyVar -> (TCvSubst, TyVar)
-substTyVarBndrCallback subst_fn subst@(TCvSubst in_scope tenv cenv) old_var
+-- Use the supplied function to substitute in the kind
+substTyVarBndrUsing
+  :: (TCvSubst -> Type -> Type)  -- ^ Use this to substitute in the kind
+  -> TCvSubst -> TyVar -> (TCvSubst, TyVar)
+substTyVarBndrUsing subst_fn subst@(TCvSubst in_scope tenv cenv) old_var
   = ASSERT2( _no_capture, pprTyVar old_var $$ pprTyVar new_var $$ ppr subst )
     ASSERT( isTyVar old_var )
     (TCvSubst (in_scope `extendInScopeSet` new_var) new_env cenv, new_var)
@@ -2550,13 +3039,18 @@ substTyVarBndrCallback subst_fn subst@(TCvSubst in_scope tenv cenv) old_var
                           setTyVarKind old_var (subst_fn subst old_ki)
         -- The uniqAway part makes sure the new variable is not already in scope
 
-substCoVarBndr :: TCvSubst -> CoVar -> (TCvSubst, CoVar)
-substCoVarBndr subst@(TCvSubst in_scope tenv cenv) old_var
+-- | Substitute a covar in a binding position, returning an
+-- extended subst and a new covar.
+-- Use the supplied function to substitute in the kind
+substCoVarBndrUsing
+  :: (TCvSubst -> Type -> Type)
+  -> TCvSubst -> CoVar -> (TCvSubst, CoVar)
+substCoVarBndrUsing subst_fn subst@(TCvSubst in_scope tenv cenv) old_var
   = ASSERT( isCoVar old_var )
     (TCvSubst (in_scope `extendInScopeSet` new_var) tenv new_cenv, new_var)
   where
     new_co         = mkCoVarCo new_var
-    no_kind_change = all noFreeVarsOfType [t1, t2]
+    no_kind_change = noFreeVarsOfTypes [t1, t2]
     no_change      = new_var == old_var && no_kind_change
 
     new_cenv | no_change = delVarEnv cenv old_var
@@ -2566,8 +3060,8 @@ substCoVarBndr subst@(TCvSubst in_scope tenv cenv) old_var
     subst_old_var = mkCoVar (varName old_var) new_var_type
 
     (_, _, t1, t2, role) = coVarKindsTypesRole old_var
-    t1' = substTy subst t1
-    t2' = substTy subst t2
+    t1' = subst_fn subst t1
+    t2' = subst_fn subst t2
     new_var_type = mkCoercionType role t1' t2'
                   -- It's important to do the substitution for coercions,
                   -- because they can have free type variables
@@ -2608,16 +3102,23 @@ defined to use this.  @pprParendType@ is the same, except it puts
 parens around the type, except for the atomic cases.  @pprParendType@
 works just by setting the initial context precedence very high.
 
+Note that any function which pretty-prints a @Type@ first converts the @Type@
+to an @IfaceType@. See Note [IfaceType and pretty-printing] in IfaceType.
+
 See Note [Precedence in types] in BasicTypes.
 -}
 
-------------------
+--------------------------------------------------------
+-- When pretty-printing types, we convert to IfaceType,
+--   and pretty-print that.
+-- See Note [Pretty printing via IfaceSyn] in PprTyThing
+--------------------------------------------------------
 
 pprType, pprParendType :: Type -> SDoc
-pprType       = pprPrecType TopPrec
-pprParendType = pprPrecType TyConPrec
+pprType       = pprPrecType topPrec
+pprParendType = pprPrecType appPrec
 
-pprPrecType :: TyPrec -> Type -> SDoc
+pprPrecType :: PprPrec -> Type -> SDoc
 pprPrecType prec ty
   = getPprStyle $ \sty ->
     if debugStyle sty           -- Use pprDebugType when in
@@ -2670,7 +3171,7 @@ tidyToIfaceCo :: Coercion -> IfaceCoercion
 tidyToIfaceCo co = toIfaceCoercionX (mkVarSet free_tcvs) (tidyCo env co)
   where
     env       = tidyFreeTyCoVars emptyTidyEnv free_tcvs
-    free_tcvs = toposortTyVars $ tyCoVarsOfCoList co
+    free_tcvs = scopedSort $ tyCoVarsOfCoList co
 
 ------------
 pprClassPred :: Class -> [Type] -> SDoc
@@ -2678,10 +3179,10 @@ pprClassPred clas tys = pprTypeApp (classTyCon clas) tys
 
 ------------
 pprTheta :: ThetaType -> SDoc
-pprTheta = pprIfaceContext TopPrec . map tidyToIfaceType
+pprTheta = pprIfaceContext topPrec . map tidyToIfaceType
 
 pprParendTheta :: ThetaType -> SDoc
-pprParendTheta = pprIfaceContext TyConPrec . map tidyToIfaceType
+pprParendTheta = pprIfaceContext appPrec . map tidyToIfaceType
 
 pprThetaArrowTy :: ThetaType -> SDoc
 pprThetaArrowTy = pprIfaceContextArr . map tidyToIfaceType
@@ -2697,18 +3198,18 @@ instance Outputable TyLit where
 pprSigmaType :: Type -> SDoc
 pprSigmaType = pprIfaceSigmaType ShowForAllWhen . tidyToIfaceType
 
-pprForAll :: [TyVarBinder] -> SDoc
+pprForAll :: [TyCoVarBinder] -> SDoc
 pprForAll tvs = pprIfaceForAll (map toIfaceForAllBndr tvs)
 
 -- | Print a user-level forall; see Note [When to print foralls]
-pprUserForAll :: [TyVarBinder] -> SDoc
+pprUserForAll :: [TyCoVarBinder] -> SDoc
 pprUserForAll = pprUserIfaceForAll . map toIfaceForAllBndr
 
-pprTvBndrs :: [TyVarBinder] -> SDoc
-pprTvBndrs tvs = sep (map pprTvBndr tvs)
+pprTCvBndrs :: [TyCoVarBinder] -> SDoc
+pprTCvBndrs tvs = sep (map pprTCvBndr tvs)
 
-pprTvBndr :: TyVarBinder -> SDoc
-pprTvBndr = pprTyVar . binderVar
+pprTCvBndr :: TyCoVarBinder -> SDoc
+pprTCvBndr = pprTyVar . binderVar
 
 pprTyVars :: [TyVar] -> SDoc
 pprTyVars tvs = sep (map pprTyVar tvs)
@@ -2724,11 +3225,11 @@ pprTyVar tv
   where
     kind = tyVarKind tv
 
-instance Outputable TyBinder where
+instance Outputable TyCoBinder where
   ppr (Anon ty) = text "[anon]" <+> ppr ty
-  ppr (Named (TvBndr v Required))  = ppr v
-  ppr (Named (TvBndr v Specified)) = char '@' <> ppr v
-  ppr (Named (TvBndr v Inferred))  = braces (ppr v)
+  ppr (Named (Bndr v Required))  = ppr v
+  ppr (Named (Bndr v Specified)) = char '@' <> ppr v
+  ppr (Named (Bndr v Inferred))  = braces (ppr v)
 
 -----------------
 instance Outputable Coercion where -- defined here to avoid orphans
@@ -2741,9 +3242,9 @@ debugPprType :: Type -> SDoc
 -- be useful for debugging.  E.g. with -dppr-debug it prints the
 -- kind on type-variable /occurrences/ which the normal route
 -- fundamentally cannot do.
-debugPprType ty = debug_ppr_ty TopPrec ty
+debugPprType ty = debug_ppr_ty topPrec ty
 
-debug_ppr_ty :: TyPrec -> Type -> SDoc
+debug_ppr_ty :: PprPrec -> Type -> SDoc
 debug_ppr_ty _ (LitTy l)
   = ppr l
 
@@ -2751,21 +3252,21 @@ debug_ppr_ty _ (TyVarTy tv)
   = ppr tv  -- With -dppr-debug we get (tv :: kind)
 
 debug_ppr_ty prec (FunTy arg res)
-  = maybeParen prec FunPrec $
-    sep [debug_ppr_ty FunPrec arg, arrow <+> debug_ppr_ty prec res]
+  = maybeParen prec funPrec $
+    sep [debug_ppr_ty funPrec arg, arrow <+> debug_ppr_ty prec res]
 
 debug_ppr_ty prec (TyConApp tc tys)
   | null tys  = ppr tc
-  | otherwise = maybeParen prec TyConPrec $
-                hang (ppr tc) 2 (sep (map (debug_ppr_ty TyConPrec) tys))
+  | otherwise = maybeParen prec appPrec $
+                hang (ppr tc) 2 (sep (map (debug_ppr_ty appPrec) tys))
 
 debug_ppr_ty prec (AppTy t1 t2)
   = hang (debug_ppr_ty prec t1)
-       2 (debug_ppr_ty TyConPrec t2)
+       2 (debug_ppr_ty appPrec t2)
 
 debug_ppr_ty prec (CastTy ty co)
-  = maybeParen prec TopPrec $
-    hang (debug_ppr_ty TopPrec ty)
+  = maybeParen prec topPrec $
+    hang (debug_ppr_ty topPrec ty)
        2 (text "|>" <+> ppr co)
 
 debug_ppr_ty _ (CoercionTy co)
@@ -2773,7 +3274,7 @@ debug_ppr_ty _ (CoercionTy co)
 
 debug_ppr_ty prec ty@(ForAllTy {})
   | (tvs, body) <- split ty
-  = maybeParen prec FunPrec $
+  = maybeParen prec funPrec $
     hang (text "forall" <+> fsep (map ppr tvs) <> dot)
          -- The (map ppr tvs) will print kind-annotated
          -- tvs, because we are (usually) in debug-style
@@ -2802,7 +3303,7 @@ This catches common situations, such as a type siguature
 which means
       f :: forall k. forall (m :: k->*) (a :: k). m a
 We really want to see both the "forall k" and the kind signatures
-on m and a.  The latter comes from pprTvBndr.
+on m and a.  The latter comes from pprTCvBndr.
 
 Note [Infix type variables]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2841,7 +3342,7 @@ pprDataConWithArgs dc = sep [forAllDoc, thetaDoc, ppr dc <+> argsDoc]
 
 pprTypeApp :: TyCon -> [Type] -> SDoc
 pprTypeApp tc tys
-  = pprIfaceTypeApp TopPrec (toIfaceTyCon tc)
+  = pprIfaceTypeApp topPrec (toIfaceTyCon tc)
                             (toIfaceTcArgs tc tys)
     -- TODO: toIfaceTcArgs seems rather wasteful here
 
@@ -2866,32 +3367,32 @@ ppSuggestExplicitKinds
 -- an interface file.
 --
 -- It doesn't change the uniques at all, just the print names.
-tidyTyCoVarBndrs :: TidyEnv -> [TyCoVar] -> (TidyEnv, [TyCoVar])
-tidyTyCoVarBndrs (occ_env, subst) tvs
-    = mapAccumL tidyTyCoVarBndr tidy_env' tvs
+tidyVarBndrs :: TidyEnv -> [TyCoVar] -> (TidyEnv, [TyCoVar])
+tidyVarBndrs (occ_env, subst) tvs
+    = mapAccumL tidyVarBndr tidy_env' tvs
   where
     -- Seed the occ_env with clashes among the names, see
     -- Node [Tidying multiple names at once] in OccName
-    -- Se still go through tidyTyCoVarBndr so that each kind variable is tidied
+    -- Se still go through tidyVarBndr so that each kind variable is tidied
     -- with the correct tidy_env
     occs = map getHelpfulOccName tvs
     tidy_env' = (avoidClashesOccEnv occ_env occs, subst)
 
-tidyTyCoVarBndr :: TidyEnv -> TyCoVar -> (TidyEnv, TyCoVar)
-tidyTyCoVarBndr tidy_env@(occ_env, subst) tyvar
-  = case tidyOccName occ_env (getHelpfulOccName tyvar) of
-      (occ_env', occ') -> ((occ_env', subst'), tyvar')
+tidyVarBndr :: TidyEnv -> TyCoVar -> (TidyEnv, TyCoVar)
+tidyVarBndr tidy_env@(occ_env, subst) var
+  = case tidyOccName occ_env (getHelpfulOccName var) of
+      (occ_env', occ') -> ((occ_env', subst'), var')
         where
-          subst' = extendVarEnv subst tyvar tyvar'
-          tyvar' = setTyVarKind (setTyVarName tyvar name') kind'
-          kind'  = tidyKind tidy_env (tyVarKind tyvar)
+          subst' = extendVarEnv subst var var'
+          var'   = setVarType (setVarName var name') type'
+          type'  = tidyType tidy_env (varType var)
           name'  = tidyNameOcc name occ'
-          name   = tyVarName tyvar
+          name   = varName var
 
 getHelpfulOccName :: TyCoVar -> OccName
-getHelpfulOccName tyvar = occ1
+getHelpfulOccName var = occ1
   where
-    name = tyVarName tyvar
+    name = varName var
     occ  = getOccName name
     -- A TcTyVar with a System Name is probably a unification variable;
     -- when we tidy them we give them a trailing "0" (or 1 etc)
@@ -2899,21 +3400,21 @@ getHelpfulOccName tyvar = occ1
     -- Plus, indicating a unification variable in this way is a
     -- helpful clue for users
     occ1 | isSystemName name
-         , isTcTyVar tyvar
+         , isTcTyVar var
          = mkTyVarOcc (occNameString occ ++ "0")
          | otherwise
          = occ
 
-tidyTyVarBinder :: TidyEnv -> TyVarBndr TyVar vis
-                -> (TidyEnv, TyVarBndr TyVar vis)
-tidyTyVarBinder tidy_env (TvBndr tv vis)
-  = (tidy_env', TvBndr tv' vis)
+tidyTyCoVarBinder :: TidyEnv -> VarBndr TyCoVar vis
+                  -> (TidyEnv, VarBndr TyCoVar vis)
+tidyTyCoVarBinder tidy_env (Bndr tv vis)
+  = (tidy_env', Bndr tv' vis)
   where
-    (tidy_env', tv') = tidyTyCoVarBndr tidy_env tv
+    (tidy_env', tv') = tidyVarBndr tidy_env tv
 
-tidyTyVarBinders :: TidyEnv -> [TyVarBndr TyVar vis]
-                 -> (TidyEnv, [TyVarBndr TyVar vis])
-tidyTyVarBinders = mapAccumL tidyTyVarBinder
+tidyTyCoVarBinders :: TidyEnv -> [VarBndr TyCoVar vis]
+                   -> (TidyEnv, [VarBndr TyCoVar vis])
+tidyTyCoVarBinders = mapAccumL tidyTyCoVarBinder
 
 ---------------
 tidyFreeTyCoVars :: TidyEnv -> [TyCoVar] -> TidyEnv
@@ -2922,7 +3423,7 @@ tidyFreeTyCoVars :: TidyEnv -> [TyCoVar] -> TidyEnv
 tidyFreeTyCoVars (full_occ_env, var_env) tyvars
   = fst (tidyOpenTyCoVars (full_occ_env, var_env) tyvars)
 
-        ---------------
+---------------
 tidyOpenTyCoVars :: TidyEnv -> [TyCoVar] -> (TidyEnv, [TyCoVar])
 tidyOpenTyCoVars env tyvars = mapAccumL tidyOpenTyCoVar env tyvars
 
@@ -2930,19 +3431,19 @@ tidyOpenTyCoVars env tyvars = mapAccumL tidyOpenTyCoVar env tyvars
 tidyOpenTyCoVar :: TidyEnv -> TyCoVar -> (TidyEnv, TyCoVar)
 -- ^ Treat a new 'TyCoVar' as a binder, and give it a fresh tidy name
 -- using the environment if one has not already been allocated. See
--- also 'tidyTyCoVarBndr'
+-- also 'tidyVarBndr'
 tidyOpenTyCoVar env@(_, subst) tyvar
   = case lookupVarEnv subst tyvar of
         Just tyvar' -> (env, tyvar')              -- Already substituted
         Nothing     ->
           let env' = tidyFreeTyCoVars env (tyCoVarsOfTypeList (tyVarKind tyvar))
-          in tidyTyCoVarBndr env' tyvar  -- Treat it as a binder
+          in tidyVarBndr env' tyvar  -- Treat it as a binder
 
 ---------------
-tidyTyVarOcc :: TidyEnv -> TyVar -> TyVar
-tidyTyVarOcc env@(_, subst) tv
+tidyTyCoVarOcc :: TidyEnv -> TyCoVar -> TyCoVar
+tidyTyCoVarOcc env@(_, subst) tv
   = case lookupVarEnv subst tv of
-        Nothing  -> updateTyVarKind (tidyType env) tv
+        Nothing  -> updateVarType (tidyType env) tv
         Just tv' -> tv'
 
 ---------------
@@ -2952,7 +3453,7 @@ tidyTypes env tys = map (tidyType env) tys
 ---------------
 tidyType :: TidyEnv -> Type -> Type
 tidyType _   (LitTy n)            = LitTy n
-tidyType env (TyVarTy tv)         = TyVarTy (tidyTyVarOcc env tv)
+tidyType env (TyVarTy tv)         = TyVarTy (tidyTyCoVarOcc env tv)
 tidyType env (TyConApp tycon tys) = let args = tidyTypes env tys
                                     in args `seqList` TyConApp tycon args
 tidyType env (AppTy fun arg)      = (AppTy $! (tidyType env fun)) $! (tidyType env arg)
@@ -2960,7 +3461,7 @@ tidyType env (FunTy fun arg)      = (FunTy $! (tidyType env fun)) $! (tidyType e
 tidyType env (ty@(ForAllTy{}))    = mkForAllTys' (zip tvs' vis) $! tidyType env' body_ty
   where
     (tvs, vis, body_ty) = splitForAllTys' ty
-    (env', tvs') = tidyTyCoVarBndrs env tvs
+    (env', tvs') = tidyVarBndrs env tvs
 tidyType env (CastTy ty co)       = (CastTy $! tidyType env ty) $! (tidyCo env co)
 tidyType env (CoercionTy co)      = CoercionTy $! (tidyCo env co)
 
@@ -2968,16 +3469,16 @@ tidyType env (CoercionTy co)      = CoercionTy $! (tidyCo env co)
 -- The following two functions differ from mkForAllTys and splitForAllTys in that
 -- they expect/preserve the ArgFlag argument. Thes belong to types/Type.hs, but
 -- how should they be named?
-mkForAllTys' :: [(TyVar, ArgFlag)] -> Type -> Type
+mkForAllTys' :: [(TyCoVar, ArgFlag)] -> Type -> Type
 mkForAllTys' tvvs ty = foldr strictMkForAllTy ty tvvs
   where
-    strictMkForAllTy (tv,vis) ty = (ForAllTy $! ((TvBndr $! tv) $! vis)) $! ty
+    strictMkForAllTy (tv,vis) ty = (ForAllTy $! ((Bndr $! tv) $! vis)) $! ty
 
-splitForAllTys' :: Type -> ([TyVar], [ArgFlag], Type)
+splitForAllTys' :: Type -> ([TyCoVar], [ArgFlag], Type)
 splitForAllTys' ty = go ty [] []
   where
-    go (ForAllTy (TvBndr tv vis) ty) tvs viss = go ty (tv:tvs) (vis:viss)
-    go ty                            tvs viss = (reverse tvs, reverse viss, ty)
+    go (ForAllTy (Bndr tv vis) ty) tvs viss = go ty (tv:tvs) (vis:viss)
+    go ty                          tvs viss = (reverse tvs, reverse viss, ty)
 
 
 ---------------
@@ -3016,12 +3517,16 @@ tidyCo :: TidyEnv -> Coercion -> Coercion
 tidyCo env@(_, subst) co
   = go co
   where
-    go (Refl r ty)           = Refl r (tidyType env ty)
+    go_mco MRefl    = MRefl
+    go_mco (MCo co) = MCo (go co)
+
+    go (Refl ty)             = Refl (tidyType env ty)
+    go (GRefl r ty mco)      = GRefl r (tidyType env ty) $! go_mco mco
     go (TyConAppCo r tc cos) = let args = map go cos
                                in args `seqList` TyConAppCo r tc args
     go (AppCo co1 co2)       = (AppCo $! go co1) $! go co2
     go (ForAllCo tv h co)    = ((ForAllCo $! tvp) $! (go h)) $! (tidyCo envp co)
-                               where (envp, tvp) = tidyTyCoVarBndr env tv
+                               where (envp, tvp) = tidyVarBndr env tv
             -- the case above duplicates a bit of work in tidying h and the kind
             -- of tv. But the alternative is to use coercionKind, which seems worse.
     go (FunCo r co1 co2)     = (FunCo r $! go co1) $! go co2
@@ -3038,7 +3543,6 @@ tidyCo env@(_, subst) co
     go (NthCo r d co)        = NthCo r d $! go co
     go (LRCo lr co)          = LRCo lr $! go co
     go (InstCo co ty)        = (InstCo $! go co) $! go ty
-    go (CoherenceCo co1 co2) = (CoherenceCo $! go co1) $! go co2
     go (KindCo co)           = KindCo $! go co
     go (SubCo co)            = SubCo $! go co
     go (AxiomRuleCo ax cos)  = let cos1 = tidyCos env cos
@@ -3077,13 +3581,15 @@ typeSize (LitTy {})                 = 1
 typeSize (TyVarTy {})               = 1
 typeSize (AppTy t1 t2)              = typeSize t1 + typeSize t2
 typeSize (FunTy t1 t2)              = typeSize t1 + typeSize t2
-typeSize (ForAllTy (TvBndr tv _) t) = typeSize (tyVarKind tv) + typeSize t
+typeSize (ForAllTy (Bndr tv _) t)   = typeSize (varType tv) + typeSize t
 typeSize (TyConApp _ ts)            = 1 + sum (map typeSize ts)
 typeSize (CastTy ty co)             = typeSize ty + coercionSize co
 typeSize (CoercionTy co)            = coercionSize co
 
 coercionSize :: Coercion -> Int
-coercionSize (Refl _ ty)         = typeSize ty
+coercionSize (Refl ty)             = typeSize ty
+coercionSize (GRefl _ ty MRefl)    = typeSize ty
+coercionSize (GRefl _ ty (MCo co)) = 1 + typeSize ty + coercionSize co
 coercionSize (TyConAppCo _ _ args) = 1 + sum (map coercionSize args)
 coercionSize (AppCo co arg)      = coercionSize co + coercionSize arg
 coercionSize (ForAllCo _ h co)   = 1 + coercionSize co + coercionSize h
@@ -3097,7 +3603,6 @@ coercionSize (TransCo co1 co2)   = 1 + coercionSize co1 + coercionSize co2
 coercionSize (NthCo _ _ co)      = 1 + coercionSize co
 coercionSize (LRCo  _ co)        = 1 + coercionSize co
 coercionSize (InstCo co arg)     = 1 + coercionSize co + coercionSize arg
-coercionSize (CoherenceCo c1 c2) = 1 + coercionSize c1 + coercionSize c2
 coercionSize (KindCo co)         = 1 + coercionSize co
 coercionSize (SubCo co)          = 1 + coercionSize co
 coercionSize (AxiomRuleCo _ cs)  = 1 + sum (map coercionSize cs)

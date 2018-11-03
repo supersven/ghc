@@ -60,7 +60,9 @@ import Data.Foldable ( Foldable )
 import Data.Functor
 import Data.Functor.Identity ( Identity(..) )
 import Data.Functor.Utils ( StateL(..), StateR(..) )
-import Data.Monoid ( Dual(..), Sum(..), Product(..), First(..), Last(..) )
+import Data.Monoid ( Dual(..), Sum(..), Product(..),
+                     First(..), Last(..), Alt(..), Ap(..) )
+import Data.Ord ( Down(..) )
 import Data.Proxy ( Proxy(..) )
 
 import GHC.Arr
@@ -163,7 +165,7 @@ class (Functor t, Foldable t) => Traversable t where
     traverse f = sequenceA . fmap f
 
     -- | Evaluate each action in the structure from left to right, and
-    -- and collect the results. For a version that ignores the results
+    -- collect the results. For a version that ignores the results
     -- see 'Data.Foldable.sequenceA_'.
     sequenceA :: Applicative f => t (f a) -> f (t a)
     {-# INLINE sequenceA #-}  -- See Note [Inline default methods]
@@ -289,12 +291,21 @@ instance Traversable First where
 instance Traversable Last where
     traverse f (Last x) = Last <$> traverse f x
 
+-- | @since 4.12.0.0
+instance (Traversable f) => Traversable (Alt f) where
+    traverse f (Alt x) = Alt <$> traverse f x
+
+-- | @since 4.12.0.0
+instance (Traversable f) => Traversable (Ap f) where
+    traverse f (Ap x) = Ap <$> traverse f x
+
 -- | @since 4.9.0.0
 instance Traversable ZipList where
     traverse f (ZipList x) = ZipList <$> traverse f x
 
 -- | @since 4.9.0.0
 deriving instance Traversable Identity
+
 
 -- Instances for GHC.Generics
 -- | @since 4.9.0.0
@@ -350,6 +361,10 @@ deriving instance Traversable UInt
 -- | @since 4.9.0.0
 deriving instance Traversable UWord
 
+-- Instance for Data.Ord
+-- | @since 4.12.0.0
+deriving instance Traversable Down
+
 -- general functions
 
 -- | 'for' is 'traverse' with its arguments flipped. For a version
@@ -365,14 +380,14 @@ forM :: (Traversable t, Monad m) => t a -> (a -> m b) -> m (t b)
 forM = flip mapM
 
 -- |The 'mapAccumL' function behaves like a combination of 'fmap'
--- and 'foldl'; it applies a function to each element of a structure,
+-- and 'Data.Foldable.foldl'; it applies a function to each element of a structure,
 -- passing an accumulating parameter from left to right, and returning
 -- a final value of this accumulator together with the new structure.
 mapAccumL :: Traversable t => (a -> b -> (a, c)) -> a -> t b -> (a, t c)
 mapAccumL f s t = runStateL (traverse (StateL . flip f) t) s
 
 -- |The 'mapAccumR' function behaves like a combination of 'fmap'
--- and 'foldr'; it applies a function to each element of a structure,
+-- and 'Data.Foldable.foldr'; it applies a function to each element of a structure,
 -- passing an accumulating parameter from right to left, and returning
 -- a final value of this accumulator together with the new structure.
 mapAccumR :: Traversable t => (a -> b -> (a, c)) -> a -> t b -> (a, t c)

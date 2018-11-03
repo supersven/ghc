@@ -13,6 +13,10 @@ T13468:
         # Expecting no output from the grep, hence "-"
         # If the case branch is not eliminated, we get a patError
 
+T3234:
+	$(RM) -f T3234.o T3234.hi
+	'$(TEST_HC)' $(TEST_HC_OPTS) -O -c -ddump-simpl-stats T3234.hs | grep 'fold/build'
+
 T3990:
 	$(RM) -f T3990.o T3990.hi
 	'$(TEST_HC)' $(TEST_HC_OPTS) -O -c -ddump-simpl T3990.hs | grep 'test_case'
@@ -188,7 +192,7 @@ T5996:
 	'$(TEST_HC)' $(TEST_HC_OPTS) -O -c T5996.hs -ddump-simpl -dsuppress-uniques -dsuppress-all | grep y2
 
 T10083:
-	$(RM) -f T10083.o T10083.hi T10083.hi-boot T10083a.o T10083a.hi 
+	$(RM) -f T10083.o T10083.hi T10083.hi-boot T10083a.o T10083a.hi
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c -O T10083.hs-boot
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c -O T10083a.hs
 	'$(TEST_HC)' $(TEST_HC_OPTS) -c -O T10083.hs
@@ -242,3 +246,8 @@ T14140:
 	$(RM) -f T14140.o T14140.hi
 	-'$(TEST_HC)' $(TEST_HC_OPTS) -O -c -ddump-simpl T14140.hs | grep '[2-9]# *->'
 # Expecting no output from the grep, hence "-"
+
+T15631:
+	$(RM) -f T15631.o T15631.hi
+	'$(TEST_HC)' $(TEST_HC_OPTS) -O -c -ddump-simpl -dsuppress-uniques T15631.hs | grep 'case'
+# Expecting one fewwer case expressions after fixing Trac #15631

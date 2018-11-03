@@ -292,10 +292,14 @@ addTickLHsBind (L pos (funBind@(FunBind { fun_id = (L _ id)  }))) = do
   tickish <- tickishType `liftM` getEnv
   if inline && tickish == ProfNotes then return (L pos funBind) else do
 
-  (fvs, mg@(MG { mg_alts = matches' })) <-
+  (fvs, mg) <-
         getFreeVars $
         addPathEntry name $
         addTickMatchGroup False (fun_matches funBind)
+
+  case mg of
+    MG {} -> return ()
+    _     -> panic "addTickLHsBind"
 
   blackListed <- isBlackListed pos
   exported_names <- liftM exports getEnv
@@ -315,7 +319,7 @@ addTickLHsBind (L pos (funBind@(FunBind { fun_id = (L _ id)  }))) = do
                 return Nothing
 
   let mbCons = maybe Prelude.id (:)
-  return $ L pos $ funBind { fun_matches = mg { mg_alts = matches' }
+  return $ L pos $ funBind { fun_matches = mg
                            , fun_tick = tick `mbCons` fun_tick funBind }
 
    where
@@ -496,9 +500,9 @@ addTickHsExpr (HsLamCase x mgs)    = liftM (HsLamCase x)
                                            (addTickMatchGroup True mgs)
 addTickHsExpr (HsApp x e1 e2)      = liftM2 (HsApp x) (addTickLHsExprNever e1)
                                                       (addTickLHsExpr      e2)
-addTickHsExpr (HsAppType ty e)   = liftM2 HsAppType (return ty)
-                                                    (addTickLHsExprNever e)
-
+addTickHsExpr (HsAppType x e ty)   = liftM3 HsAppType (return x)
+                                                      (addTickLHsExprNever e)
+                                                      (return ty)
 
 addTickHsExpr (OpApp fix e1 e2 e3) =
         liftM4 OpApp
@@ -562,10 +566,6 @@ addTickHsExpr (ExplicitList ty wit es) =
                    addTickWit (Just fln)
                      = do fln' <- addTickSyntaxExpr hpcSrcSpan fln
                           return (Just fln')
-addTickHsExpr (ExplicitPArr ty es) =
-        liftM2 ExplicitPArr
-                (return ty)
-                (mapM (addTickLHsExpr) es)
 
 addTickHsExpr (HsStatic fvs e) = HsStatic fvs <$> addTickLHsExpr e
 
@@ -578,11 +578,12 @@ addTickHsExpr expr@(RecordUpd { rupd_expr = e, rupd_flds = flds })
        ; flds' <- mapM addTickHsRecField flds
        ; return (expr { rupd_expr = e', rupd_flds = flds' }) }
 
-addTickHsExpr (ExprWithTySig ty e) =
-        liftM2 ExprWithTySig
-                (return ty)
+addTickHsExpr (ExprWithTySig x e ty) =
+        liftM3 ExprWithTySig
+                (return x)
                 (addTickLHsExprNever e) -- No need to tick the inner expression
                                         -- for expressions with signatures
+                (return ty)
 addTickHsExpr (ArithSeq ty wit arith_seq) =
         liftM3 ArithSeq
                 (return ty)
@@ -602,10 +603,6 @@ addTickHsExpr (HsTickPragma _ _ _ _ (L pos e0)) = do
     e2 <- allocTickBox (ExpBox False) False False pos $
                 addTickHsExpr e0
     return $ unLoc e2
-addTickHsExpr (PArrSeq ty arith_seq) =
-        liftM2 PArrSeq
-                (return ty)
-                (addTickArithSeqInfo arith_seq)
 addTickHsExpr (HsSCC x src nm e) =
         liftM3 (HsSCC x)
                 (return src)
@@ -818,7 +815,7 @@ addTickIPBind (IPBind x nm e) =
         liftM2 (IPBind x)
                 (return nm)
                 (addTickLHsExpr e)
-addTickIPBind (XCIPBind x) = return (XCIPBind x)
+addTickIPBind (XIPBind x) = return (XIPBind x)
 
 -- There is no location here, so we might need to use a context location??
 addTickSyntaxExpr :: SrcSpan -> SyntaxExpr GhcTc -> TM (SyntaxExpr GhcTc)

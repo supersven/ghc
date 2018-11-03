@@ -15,7 +15,7 @@ module TcIface (
         typecheckIfacesForMerging,
         typecheckIfaceForInstantiate,
         tcIfaceDecl, tcIfaceInst, tcIfaceFamInst, tcIfaceRules,
-        tcIfaceVectInfo, tcIfaceAnnotations, tcIfaceCompleteSigs,
+        tcIfaceAnnotations, tcIfaceCompleteSigs,
         tcIfaceExpr,    -- Desired by HERMIT (Trac #7683)
         tcIfaceGlobal
  ) where
@@ -55,7 +55,6 @@ import PrelNames
 import TysWiredIn
 import Literal
 import Var
-import VarEnv
 import VarSet
 import Name
 import NameEnv
@@ -76,7 +75,6 @@ import ListSetOps
 import GHC.Fingerprint
 import qualified BooleanFormula as BF
 
-import Data.List
 import Control.Monad
 import qualified Data.Map as Map
 
@@ -173,9 +171,6 @@ typecheckIface iface
         ; rules     <- tcIfaceRules ignore_prags (mi_rules iface)
         ; anns      <- tcIfaceAnnotations (mi_anns iface)
 
-                -- Vectorisation information
-        ; vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
-
                 -- Exports
         ; exports <- ifaceExportNames (mi_exports iface)
 
@@ -193,7 +188,6 @@ typecheckIface iface
                               , md_fam_insts = fam_insts
                               , md_rules     = rules
                               , md_anns      = anns
-                              , md_vect_info = vect_info
                               , md_exports   = exports
                               , md_complete_sigs = complete_sigs
                               }
@@ -393,7 +387,6 @@ typecheckIfacesForMerging mod ifaces tc_env_var =
         fam_insts <- mapM tcIfaceFamInst (mi_fam_insts iface)
         rules     <- tcIfaceRules ignore_prags (mi_rules iface)
         anns      <- tcIfaceAnnotations (mi_anns iface)
-        vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
         exports   <- ifaceExportNames (mi_exports iface)
         complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
         return $ ModDetails { md_types     = type_env
@@ -401,7 +394,6 @@ typecheckIfacesForMerging mod ifaces tc_env_var =
                             , md_fam_insts = fam_insts
                             , md_rules     = rules
                             , md_anns      = anns
-                            , md_vect_info = vect_info
                             , md_exports   = exports
                             , md_complete_sigs = complete_sigs
                             }
@@ -434,7 +426,6 @@ typecheckIfaceForInstantiate nsubst iface =
     fam_insts <- mapM tcIfaceFamInst (mi_fam_insts iface)
     rules     <- tcIfaceRules ignore_prags (mi_rules iface)
     anns      <- tcIfaceAnnotations (mi_anns iface)
-    vect_info <- tcIfaceVectInfo (mi_semantic_module iface) type_env (mi_vect_info iface)
     exports   <- ifaceExportNames (mi_exports iface)
     complete_sigs <- tcIfaceCompleteSigs (mi_complete_sigs iface)
     return $ ModDetails { md_types     = type_env
@@ -442,7 +433,6 @@ typecheckIfaceForInstantiate nsubst iface =
                         , md_fam_insts = fam_insts
                         , md_rules     = rules
                         , md_anns      = anns
-                        , md_vect_info = vect_info
                         , md_exports   = exports
                         , md_complete_sigs = complete_sigs
                         }
@@ -679,7 +669,7 @@ tc_iface_decl _ _ (IfaceData {ifName = tc_name,
       = do { ax <- tcIfaceCoAxiom ax_name
            ; let fam_tc  = coAxiomTyCon ax
                  ax_unbr = toUnbranchedAxiom ax
-           ; lhs_tys <- tcIfaceTcArgs arg_tys
+           ; lhs_tys <- tcIfaceAppArgs arg_tys
            ; return (DataFamInstTyCon ax_unbr fam_tc lhs_tys) }
 
 tc_iface_decl _ _ (IfaceSynonym {ifName = tc_name,
@@ -871,10 +861,10 @@ tc_ax_branch prev_branches
                             , ifaxbLHS = lhs, ifaxbRHS = rhs
                             , ifaxbRoles = roles, ifaxbIncomps = incomps })
   = bindIfaceTyConBinders_AT
-      (map (\b -> TvBndr b (NamedTCB Inferred)) tv_bndrs) $ \ tvs ->
+      (map (\b -> Bndr (IfaceTvBndr b) (NamedTCB Inferred)) tv_bndrs) $ \ tvs ->
          -- The _AT variant is needed here; see Note [CoAxBranch type variables] in CoAxiom
     bindIfaceIds cv_bndrs $ \ cvs -> do
-    { tc_lhs <- tcIfaceTcArgs lhs
+    { tc_lhs <- tcIfaceAppArgs lhs
     ; tc_rhs <- tcIfaceType rhs
     ; let br = CoAxBranch { cab_loc     = noSrcSpan
                           , cab_tvs     = binderVars tvs
@@ -901,7 +891,7 @@ tcIfaceDataCons tycon_name tycon tc_tybinders if_cons
     tag_map = mkTyConTagMap tycon
 
     tc_con_decl (IfCon { ifConInfix = is_infix,
-                         ifConExTvs = ex_bndrs,
+                         ifConExTCvs = ex_bndrs,
                          ifConUserTvBinders = user_bndrs,
                          ifConName = dc_name,
                          ifConCtxt = ctxt, ifConEqSpec = spec,
@@ -910,7 +900,7 @@ tcIfaceDataCons tycon_name tycon tc_tybinders if_cons
                          ifConSrcStricts = if_src_stricts})
      = -- Universally-quantified tyvars are shared with
        -- parent TyCon, and are already in scope
-       bindIfaceTyVars ex_bndrs    $ \ ex_tvs -> do
+       bindIfaceBndrs ex_bndrs    $ \ ex_tvs -> do
         { traceIf (text "Start interface-file tc_con_decl" <+> ppr dc_name)
 
           -- By this point, we have bound every universal and existential
@@ -919,8 +909,12 @@ tcIfaceDataCons tycon_name tycon tc_tybinders if_cons
           -- ifConUserTvBinders has a matching counterpart somewhere in the
           -- bound universals/existentials. As a result, calling tcIfaceTyVar
           -- below is always guaranteed to succeed.
-        ; user_tv_bndrs <- mapM (\(TvBndr (name, _) vis) ->
-                                    TvBndr <$> tcIfaceTyVar name <*> pure vis)
+        ; user_tv_bndrs <- mapM (\(Bndr bd vis) ->
+                                   case bd of
+                                     IfaceIdBndr (name, _) ->
+                                       Bndr <$> tcIfaceLclId name <*> pure vis
+                                     IfaceTvBndr (name, _) ->
+                                       Bndr <$> tcIfaceTyVar name <*> pure vis)
                                 user_bndrs
 
         -- Read the context and argument types, but lazily for two reasons
@@ -946,7 +940,7 @@ tcIfaceDataCons tycon_name tycon tc_tybinders if_cons
 
         -- Remember, tycon is the representation tycon
         ; let orig_res_ty = mkFamilyTyConApp tycon
-                                (substTyVars (mkTvSubstPrs (map eqSpecPair eq_spec))
+                              (substTyCoVars (mkTvSubstPrs (map eqSpecPair eq_spec))
                                              (binderVars tc_tybinders))
 
         ; prom_rep_name <- newTyConRepName dc_name
@@ -1083,7 +1077,7 @@ tcIfaceRule (IfaceRule {ifRuleName = name, ifActivation = act, ifRuleBndrs = bnd
         -- to write them out in coreRuleToIfaceRule
     ifTopFreeName :: IfaceExpr -> Maybe Name
     ifTopFreeName (IfaceType (IfaceTyConApp tc _ )) = Just (ifaceTyConName tc)
-    ifTopFreeName (IfaceType (IfaceTupleTy s _ ts)) = Just (tupleTyConName s (length (tcArgsIfaceTypes ts)))
+    ifTopFreeName (IfaceType (IfaceTupleTy s _ ts)) = Just (tupleTyConName s (length (appArgsIfaceTypes ts)))
     ifTopFreeName (IfaceApp f _)                    = ifTopFreeName f
     ifTopFreeName (IfaceExt n)                      = Just n
     ifTopFreeName _                                 = Nothing
@@ -1131,134 +1125,6 @@ tcIfaceCompleteSig (IfaceCompleteMatch ms t) = return (CompleteMatch ms t)
 {-
 ************************************************************************
 *                                                                      *
-                Vectorisation information
-*                                                                      *
-************************************************************************
--}
-
--- We need access to the type environment as we need to look up information about type constructors
--- (i.e., their data constructors and whether they are class type constructors).  If a vectorised
--- type constructor or class is defined in the same module as where it is vectorised, we cannot
--- look that information up from the type constructor that we obtained via a 'forkM'ed
--- 'tcIfaceTyCon' without recursively loading the interface that we are already type checking again
--- and again and again...
---
-tcIfaceVectInfo :: Module -> TypeEnv -> IfaceVectInfo -> IfL VectInfo
-tcIfaceVectInfo mod typeEnv (IfaceVectInfo
-                             { ifaceVectInfoVar            = vars
-                             , ifaceVectInfoTyCon          = tycons
-                             , ifaceVectInfoTyConReuse     = tyconsReuse
-                             , ifaceVectInfoParallelVars   = parallelVars
-                             , ifaceVectInfoParallelTyCons = parallelTyCons
-                             })
-  = do { let parallelTyConsSet = mkNameSet parallelTyCons
-       ; vVars         <- mapM vectVarMapping                  vars
-       ; let varsSet = mkVarSet (map fst vVars)
-       ; tyConRes1     <- mapM (vectTyConVectMapping varsSet)  tycons
-       ; tyConRes2     <- mapM (vectTyConReuseMapping varsSet) tyconsReuse
-       ; vParallelVars <- mapM vectVar                         parallelVars
-       ; let (vTyCons, vDataCons, vScSels) = unzip3 (tyConRes1 ++ tyConRes2)
-       ; return $ VectInfo
-                  { vectInfoVar            = mkDVarEnv vVars `extendDVarEnvList` concat vScSels
-                  , vectInfoTyCon          = mkNameEnv vTyCons
-                  , vectInfoDataCon        = mkNameEnv (concat vDataCons)
-                  , vectInfoParallelVars   = mkDVarSet vParallelVars
-                  , vectInfoParallelTyCons = parallelTyConsSet
-                  }
-       }
-  where
-    vectVarMapping name
-      = do { vName <- lookupIfaceTop (mkLocalisedOccName mod mkVectOcc name)
-           ; var   <- forkM (text "vect var"  <+> ppr name)  $
-                        tcIfaceExtId name
-           ; vVar  <- forkM (text "vect vVar [mod =" <+>
-                             ppr mod <> text "; nameModule =" <+>
-                             ppr (nameModule name) <> text "]" <+> ppr vName) $
-                       tcIfaceExtId vName
-           ; return (var, (var, vVar))
-           }
-      -- where
-      --   lookupLocalOrExternalId name
-      --     = do { let mb_id = lookupTypeEnv typeEnv name
-      --          ; case mb_id of
-      --                -- id is local
-      --              Just (AnId id) -> return id
-      --                -- name is not an Id => internal inconsistency
-      --              Just _         -> notAnIdErr
-      --                -- Id is external
-      --              Nothing        -> tcIfaceExtId name
-      --          }
-      --
-      --   notAnIdErr = pprPanic "TcIface.tcIfaceVectInfo: not an id" (ppr name)
-
-    vectVar name
-      = forkM (text "vect scalar var"  <+> ppr name)  $
-          tcIfaceExtId name
-
-    vectTyConVectMapping vars name
-      = do { vName  <- lookupIfaceTop (mkLocalisedOccName mod mkVectTyConOcc name)
-           ; vectTyConMapping vars name vName
-           }
-
-    vectTyConReuseMapping vars name
-      = vectTyConMapping vars name name
-
-    vectTyConMapping vars name vName
-      = do { tycon  <- lookupLocalOrExternalTyCon name
-           ; vTycon <- forkM (text "vTycon of" <+> ppr vName) $
-                         lookupLocalOrExternalTyCon vName
-
-               -- Map the data constructors of the original type constructor to those of the
-               -- vectorised type constructor /unless/ the type constructor was vectorised
-               -- abstractly; if it was vectorised abstractly, the workers of its data constructors
-               -- do not appear in the set of vectorised variables.
-               --
-               -- NB: This is lazy!  We don't pull at the type constructors before we actually use
-               --     the data constructor mapping.
-           ; let isAbstract | isClassTyCon tycon = False
-                            | datacon:_ <- tyConDataCons tycon
-                                                 = not $ dataConWrapId datacon `elemVarSet` vars
-                            | otherwise          = True
-                 vDataCons  | isAbstract = []
-                            | otherwise  = [ (dataConName datacon, (datacon, vDatacon))
-                                           | (datacon, vDatacon) <- zip (tyConDataCons tycon)
-                                                                        (tyConDataCons vTycon)
-                                           ]
-
-                   -- Map the (implicit) superclass and methods selectors as they don't occur in
-                   -- the var map.
-                 vScSels    | Just cls  <- tyConClass_maybe tycon
-                            , Just vCls <- tyConClass_maybe vTycon
-                            = [ (sel, (sel, vSel))
-                              | (sel, vSel) <- zip (classAllSelIds cls) (classAllSelIds vCls)
-                              ]
-                            | otherwise
-                            = []
-
-           ; return ( (name, (tycon, vTycon))          -- (T, T_v)
-                    , vDataCons                        -- list of (Ci, Ci_v)
-                    , vScSels                          -- list of (seli, seli_v)
-                    )
-           }
-      where
-          -- we need a fully defined version of the type constructor to be able to extract
-          -- its data constructors etc.
-        lookupLocalOrExternalTyCon name
-          = do { let mb_tycon = lookupTypeEnv typeEnv name
-               ; case mb_tycon of
-                     -- tycon is local
-                   Just (ATyCon tycon) -> return tycon
-                     -- name is not a tycon => internal inconsistency
-                   Just _              -> notATyConErr
-                     -- tycon is external
-                   Nothing             -> tcIfaceTyConByName name
-               }
-
-        notATyConErr = pprPanic "TcIface.tcIfaceVectInfo: not a tycon" (ppr name)
-
-{-
-************************************************************************
-*                                                                      *
                         Types
 *                                                                      *
 ************************************************************************
@@ -1269,24 +1135,27 @@ tcIfaceType = go
   where
     go (IfaceTyVar n)         = TyVarTy <$> tcIfaceTyVar n
     go (IfaceFreeTyVar n)     = pprPanic "tcIfaceType:IfaceFreeTyVar" (ppr n)
-    go (IfaceAppTy t1 t2)     = AppTy <$> go t1 <*> go t2
     go (IfaceLitTy l)         = LitTy <$> tcIfaceTyLit l
     go (IfaceFunTy t1 t2)     = FunTy <$> go t1 <*> go t2
     go (IfaceDFunTy t1 t2)    = FunTy <$> go t1 <*> go t2
     go (IfaceTupleTy s i tks) = tcIfaceTupleTy s i tks
+    go (IfaceAppTy t ts)
+      = do { t'  <- go t
+           ; ts' <- traverse go (appArgsIfaceTypes ts)
+           ; pure (foldl' AppTy t' ts') }
     go (IfaceTyConApp tc tks)
       = do { tc' <- tcIfaceTyCon tc
-           ; tks' <- mapM go (tcArgsIfaceTypes tks)
+           ; tks' <- mapM go (appArgsIfaceTypes tks)
            ; return (mkTyConApp tc' tks') }
     go (IfaceForAllTy bndr t)
       = bindIfaceForAllBndr bndr $ \ tv' vis ->
-        ForAllTy (TvBndr tv' vis) <$> go t
+        ForAllTy (Bndr tv' vis) <$> go t
     go (IfaceCastTy ty co)   = CastTy <$> go ty <*> tcIfaceCo co
     go (IfaceCoercionTy co)  = CoercionTy <$> tcIfaceCo co
 
-tcIfaceTupleTy :: TupleSort -> IsPromoted -> IfaceTcArgs -> IfL Type
+tcIfaceTupleTy :: TupleSort -> IsPromoted -> IfaceAppArgs -> IfL Type
 tcIfaceTupleTy sort is_promoted args
- = do { args' <- tcIfaceTcArgs args
+ = do { args' <- tcIfaceAppArgs args
       ; let arity = length args'
       ; base_tc <- tcTupleTyCon True sort arity
       ; case is_promoted of
@@ -1313,8 +1182,8 @@ tcTupleTyCon in_type sort arity
                      | otherwise = arity
                       -- in expressions, we only have term args
 
-tcIfaceTcArgs :: IfaceTcArgs -> IfL [Type]
-tcIfaceTcArgs = mapM tcIfaceType . tcArgsIfaceTypes
+tcIfaceAppArgs :: IfaceAppArgs -> IfL [Type]
+tcIfaceAppArgs = mapM tcIfaceType . appArgsIfaceTypes
 
 -----------------------------------------
 tcIfaceCtxt :: IfaceContext -> IfL ThetaType
@@ -1336,13 +1205,17 @@ tcIfaceTyLit (IfaceStrTyLit n) = return (StrTyLit n)
 tcIfaceCo :: IfaceCoercion -> IfL Coercion
 tcIfaceCo = go
   where
-    go (IfaceReflCo r t)         = Refl r <$> tcIfaceType t
+    go_mco IfaceMRefl    = pure MRefl
+    go_mco (IfaceMCo co) = MCo <$> (go co)
+
+    go (IfaceReflCo t)           = Refl <$> tcIfaceType t
+    go (IfaceGReflCo r t mco)    = GRefl r <$> tcIfaceType t <*> go_mco mco
     go (IfaceFunCo r c1 c2)      = mkFunCo r <$> go c1 <*> go c2
     go (IfaceTyConAppCo r tc cs)
       = TyConAppCo r <$> tcIfaceTyCon tc <*> mapM go cs
     go (IfaceAppCo c1 c2)        = AppCo <$> go c1 <*> go c2
     go (IfaceForAllCo tv k c)  = do { k' <- go k
-                                      ; bindIfaceTyVar tv $ \ tv' ->
+                                      ; bindIfaceBndr tv $ \ tv' ->
                                         ForAllCo tv' k' <$> go c }
     go (IfaceCoVarCo n)          = CoVarCo <$> go_var n
     go (IfaceAxiomInstCo n i cs) = AxiomInstCo <$> tcIfaceCoAxiom n <*> pure i <*> mapM go cs
@@ -1356,8 +1229,6 @@ tcIfaceCo = go
     go (IfaceNthCo d c)          = do { c' <- go c
                                       ; return $ mkNthCo (nthCoRole d c') d c' }
     go (IfaceLRCo lr c)          = LRCo lr  <$> go c
-    go (IfaceCoherenceCo c1 c2)  = CoherenceCo <$> go c1
-                                               <*> go c2
     go (IfaceKindCo c)           = KindCo   <$> go c
     go (IfaceSubCo c)            = SubCo    <$> go c
     go (IfaceAxiomRuleCo ax cos) = AxiomRuleCo <$> tcIfaceCoAxiomRule ax
@@ -1504,9 +1375,15 @@ tcIfaceLit :: Literal -> IfL Literal
 -- Integer literals deserialise to (LitInteger i <error thunk>)
 -- so tcIfaceLit just fills in the type.
 -- See Note [Integer literals] in Literal
-tcIfaceLit (LitInteger i _)
+tcIfaceLit (LitNumber LitNumInteger i _)
   = do t <- tcIfaceTyConByName integerTyConName
        return (mkLitInteger i (mkTyConTy t))
+-- Natural literals deserialise to (LitNatural i <error thunk>)
+-- so tcIfaceLit just fills in the type.
+-- See Note [Natural literals] in Literal
+tcIfaceLit (LitNumber LitNumNatural i _)
+  = do t <- tcIfaceTyConByName naturalTyConName
+       return (mkLitNatural i (mkTyConTy t))
 tcIfaceLit lit = return lit
 
 -------------------------
@@ -1872,23 +1749,18 @@ bindIfaceBndrs (b:bs) thing_inside
     thing_inside (b':bs')
 
 -----------------------
-bindIfaceForAllBndrs :: [IfaceForAllBndr] -> ([TyVarBinder] -> IfL a) -> IfL a
+bindIfaceForAllBndrs :: [IfaceForAllBndr] -> ([TyCoVarBinder] -> IfL a) -> IfL a
 bindIfaceForAllBndrs [] thing_inside = thing_inside []
 bindIfaceForAllBndrs (bndr:bndrs) thing_inside
   = bindIfaceForAllBndr bndr $ \tv vis ->
     bindIfaceForAllBndrs bndrs $ \bndrs' ->
-    thing_inside (mkTyVarBinder vis tv : bndrs')
+    thing_inside (mkTyCoVarBinder vis tv : bndrs')
 
-bindIfaceForAllBndr :: IfaceForAllBndr -> (TyVar -> ArgFlag -> IfL a) -> IfL a
-bindIfaceForAllBndr (TvBndr tv vis) thing_inside
+bindIfaceForAllBndr :: IfaceForAllBndr -> (TyCoVar -> ArgFlag -> IfL a) -> IfL a
+bindIfaceForAllBndr (Bndr (IfaceTvBndr tv) vis) thing_inside
   = bindIfaceTyVar tv $ \tv' -> thing_inside tv' vis
-
-bindIfaceTyVars :: [IfaceTvBndr] -> ([TyVar] -> IfL a) -> IfL a
-bindIfaceTyVars [] thing_inside = thing_inside []
-bindIfaceTyVars (tv:tvs) thing_inside
-  = bindIfaceTyVar tv   $ \tv' ->
-    bindIfaceTyVars tvs $ \tvs' ->
-    thing_inside (tv' : tvs')
+bindIfaceForAllBndr (Bndr (IfaceIdBndr tv) vis) thing_inside
+  = bindIfaceId tv $ \tv' -> thing_inside tv' vis
 
 bindIfaceTyVar :: IfaceTvBndr -> (TyVar -> IfL a) -> IfL a
 bindIfaceTyVar (occ,kind) thing_inside
@@ -1905,8 +1777,8 @@ bindIfaceTyConBinders :: [IfaceTyConBinder]
                       -> ([TyConBinder] -> IfL a) -> IfL a
 bindIfaceTyConBinders [] thing_inside = thing_inside []
 bindIfaceTyConBinders (b:bs) thing_inside
-  = bindIfaceTyConBinderX bindIfaceTyVar b $ \ b'  ->
-    bindIfaceTyConBinders bs               $ \ bs' ->
+  = bindIfaceTyConBinderX bindIfaceBndr b $ \ b'  ->
+    bindIfaceTyConBinders bs              $ \ bs' ->
     thing_inside (b':bs')
 
 bindIfaceTyConBinders_AT :: [IfaceTyConBinder]
@@ -1923,14 +1795,14 @@ bindIfaceTyConBinders_AT (b : bs) thing_inside
     thing_inside (b':bs')
   where
     bind_tv tv thing
-      = do { mb_tv <- lookupIfaceTyVar tv
+      = do { mb_tv <- lookupIfaceVar tv
            ; case mb_tv of
                Just b' -> thing b'
-               Nothing -> bindIfaceTyVar tv thing }
+               Nothing -> bindIfaceBndr tv thing }
 
-bindIfaceTyConBinderX :: (IfaceTvBndr -> (TyVar -> IfL a) -> IfL a)
+bindIfaceTyConBinderX :: (IfaceBndr -> (TyCoVar -> IfL a) -> IfL a)
                       -> IfaceTyConBinder
                       -> (TyConBinder -> IfL a) -> IfL a
-bindIfaceTyConBinderX bind_tv (TvBndr tv vis) thing_inside
+bindIfaceTyConBinderX bind_tv (Bndr tv vis) thing_inside
   = bind_tv tv $ \tv' ->
-    thing_inside (TvBndr tv' vis)
+    thing_inside (Bndr tv' vis)

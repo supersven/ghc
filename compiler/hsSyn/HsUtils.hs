@@ -20,7 +20,7 @@ which deal with the instantiated versions are located elsewhere:
 
 module HsUtils(
   -- Terms
-  mkHsPar, mkHsApp, mkHsAppType, mkHsAppTypes, mkHsAppTypeOut, mkHsCaseAlt,
+  mkHsPar, mkHsApp, mkHsAppType, mkHsAppTypes, mkHsCaseAlt,
   mkSimpleMatch, unguardedGRHSs, unguardedRHS,
   mkMatchGroup, mkMatch, mkPrefixFunRhs, mkHsLam, mkHsIf,
   mkHsWrap, mkLHsWrap, mkHsWrapCo, mkHsWrapCoR, mkLHsWrapCo,
@@ -176,22 +176,22 @@ mkLocatedList ms = L (combineLocs (head ms) (last ms)) ms
 mkHsApp :: LHsExpr (GhcPass id) -> LHsExpr (GhcPass id) -> LHsExpr (GhcPass id)
 mkHsApp e1 e2 = addCLoc e1 e2 (HsApp noExt e1 e2)
 
-mkHsAppType :: LHsExpr GhcRn -> LHsWcType GhcRn -> LHsExpr GhcRn
-mkHsAppType e t = addCLoc e (hswc_body t) (HsAppType t e)
+mkHsAppType :: (NoGhcTc (GhcPass id) ~ GhcRn)
+            => LHsExpr (GhcPass id) -> LHsWcType GhcRn -> LHsExpr (GhcPass id)
+mkHsAppType e t = addCLoc e t_body (HsAppType noExt e paren_wct)
+  where
+    t_body    = hswc_body t
+    paren_wct = t { hswc_body = parenthesizeHsType appPrec t_body }
 
 mkHsAppTypes :: LHsExpr GhcRn -> [LHsWcType GhcRn] -> LHsExpr GhcRn
-mkHsAppTypes = foldl mkHsAppType
-
--- AZ:TODO this can go, in favour of mkHsAppType. ?
-mkHsAppTypeOut :: LHsExpr GhcTc -> LHsWcType GhcRn -> LHsExpr GhcTc
-mkHsAppTypeOut e t = addCLoc e (hswc_body t) (HsAppType t e)
+mkHsAppTypes = foldl' mkHsAppType
 
 mkHsLam :: [LPat GhcPs] -> LHsExpr GhcPs -> LHsExpr GhcPs
 mkHsLam pats body = mkHsPar (L (getLoc body) (HsLam noExt matches))
   where
     matches = mkMatchGroup Generated
                            [mkSimpleMatch LambdaExpr pats' body]
-    pats' = map parenthesizeCompoundPat pats
+    pats' = map (parenthesizePat appPrec) pats
 
 mkHsLams :: [TyVar] -> [EvVar] -> LHsExpr GhcTc -> LHsExpr GhcTc
 mkHsLams tyvars dicts expr = mkLHsWrap (mkWpTyLams tyvars
@@ -210,18 +210,18 @@ nlHsTyApp fun_id tys
 
 nlHsTyApps :: IdP (GhcPass id) -> [Type] -> [LHsExpr (GhcPass id)]
            -> LHsExpr (GhcPass id)
-nlHsTyApps fun_id tys xs = foldl nlHsApp (nlHsTyApp fun_id tys) xs
+nlHsTyApps fun_id tys xs = foldl' nlHsApp (nlHsTyApp fun_id tys) xs
 
 --------- Adding parens ---------
 mkLHsPar :: LHsExpr (GhcPass id) -> LHsExpr (GhcPass id)
--- Wrap in parens if hsExprNeedsParens says it needs them
+-- Wrap in parens if (hsExprNeedsParens appPrec) says it needs them
 -- So   'f x'  becomes '(f x)', but '3' stays as '3'
-mkLHsPar le@(L loc e) | hsExprNeedsParens e = L loc (HsPar noExt le)
-                      | otherwise           = le
+mkLHsPar le@(L loc e) | hsExprNeedsParens appPrec e = L loc (HsPar noExt le)
+                      | otherwise                   = le
 
 mkParPat :: LPat (GhcPass name) -> LPat (GhcPass name)
-mkParPat lp@(L loc p) | hsPatNeedsParens p = L loc (ParPat noExt lp)
-                      | otherwise          = lp
+mkParPat lp@(L loc p) | patNeedsParens appPrec p = L loc (ParPat noExt lp)
+                      | otherwise                = lp
 
 nlParPat :: LPat (GhcPass name) -> LPat (GhcPass name)
 nlParPat p = noLoc (ParPat noExt p)
@@ -418,17 +418,17 @@ nlHsSyntaxApps (SyntaxExpr { syn_expr      = fun
                            , syn_res_wrap  = res_wrap }) args
   | [] <- arg_wraps   -- in the noSyntaxExpr case
   = ASSERT( isIdHsWrapper res_wrap )
-    foldl nlHsApp (noLoc fun) args
+    foldl' nlHsApp (noLoc fun) args
 
   | otherwise
-  = mkLHsWrap res_wrap (foldl nlHsApp (noLoc fun) (zipWithEqual "nlHsSyntaxApps"
+  = mkLHsWrap res_wrap (foldl' nlHsApp (noLoc fun) (zipWithEqual "nlHsSyntaxApps"
                                                      mkLHsWrap arg_wraps args))
 
 nlHsApps :: IdP (GhcPass id) -> [LHsExpr (GhcPass id)] -> LHsExpr (GhcPass id)
-nlHsApps f xs = foldl nlHsApp (nlHsVar f) xs
+nlHsApps f xs = foldl' nlHsApp (nlHsVar f) xs
 
 nlHsVarApps :: IdP (GhcPass id) -> [IdP (GhcPass id)] -> LHsExpr (GhcPass id)
-nlHsVarApps f xs = noLoc (foldl mk (HsVar noExt (noLoc f))
+nlHsVarApps f xs = noLoc (foldl' mk (HsVar noExt (noLoc f))
                                                (map ((HsVar noExt) . noLoc) xs))
                  where
                    mk f a = HsApp noExt (noLoc f) (noLoc a)
@@ -439,16 +439,18 @@ nlConVarPat con vars = nlConPat con (map nlVarPat vars)
 nlConVarPatName :: Name -> [Name] -> LPat GhcRn
 nlConVarPatName con vars = nlConPatName con (map nlVarPat vars)
 
-nlInfixConPat :: IdP id -> LPat id -> LPat id -> LPat id
-nlInfixConPat con l r = noLoc (ConPatIn (noLoc con) (InfixCon l r))
+nlInfixConPat :: RdrName -> LPat GhcPs -> LPat GhcPs -> LPat GhcPs
+nlInfixConPat con l r = noLoc (ConPatIn (noLoc con)
+                              (InfixCon (parenthesizePat opPrec l)
+                                        (parenthesizePat opPrec r)))
 
 nlConPat :: RdrName -> [LPat GhcPs] -> LPat GhcPs
 nlConPat con pats =
-  noLoc (ConPatIn (noLoc con) (PrefixCon (map parenthesizeCompoundPat pats)))
+  noLoc (ConPatIn (noLoc con) (PrefixCon (map (parenthesizePat appPrec) pats)))
 
 nlConPatName :: Name -> [LPat GhcRn] -> LPat GhcRn
 nlConPatName con pats =
-  noLoc (ConPatIn (noLoc con) (PrefixCon (map parenthesizeCompoundPat pats)))
+  noLoc (ConPatIn (noLoc con) (PrefixCon (map (parenthesizePat appPrec) pats)))
 
 nlNullaryConPat :: IdP id -> LPat id
 nlNullaryConPat con = noLoc (ConPatIn (noLoc con) (PrefixCon []))
@@ -496,13 +498,19 @@ nlHsTyVar :: IdP (GhcPass p)                            -> LHsType (GhcPass p)
 nlHsFunTy :: LHsType (GhcPass p) -> LHsType (GhcPass p) -> LHsType (GhcPass p)
 nlHsParTy :: LHsType (GhcPass p)                        -> LHsType (GhcPass p)
 
-nlHsAppTy f t = noLoc (HsAppTy noExt f (parenthesizeCompoundHsType t))
+nlHsAppTy f t = noLoc (HsAppTy noExt f (parenthesizeHsType appPrec t))
 nlHsTyVar x   = noLoc (HsTyVar noExt NotPromoted (noLoc x))
-nlHsFunTy a b = noLoc (HsFunTy noExt a b)
+nlHsFunTy a b = noLoc (HsFunTy noExt (parenthesizeHsType funPrec a)
+                                     (parenthesize_fun_tail b))
+  where
+    parenthesize_fun_tail (L loc (HsFunTy ext ty1 ty2))
+      = L loc (HsFunTy ext (parenthesizeHsType funPrec ty1)
+                           (parenthesize_fun_tail ty2))
+    parenthesize_fun_tail lty = lty
 nlHsParTy t   = noLoc (HsParTy noExt t)
 
 nlHsTyConApp :: IdP (GhcPass p) -> [LHsType (GhcPass p)] -> LHsType (GhcPass p)
-nlHsTyConApp tycon tys  = foldl nlHsAppTy (nlHsTyVar tycon) tys
+nlHsTyConApp tycon tys  = foldl' nlHsAppTy (nlHsTyVar tycon) tys
 
 {-
 Tuples.  All these functions are *pre-typechecker* because they lack
@@ -666,7 +674,7 @@ typeToLHsType ty
       | any isInvisibleTyConBinder (tyConBinders tc)
         -- We must produce an explicit kind signature here to make certain
         -- programs kind-check. See Note [Kind signatures in typeToLHsType].
-      = noLoc $ HsKindSig NoExt lhs_ty (go (typeKind ty))
+      = nlHsParTy $ noLoc $ HsKindSig NoExt lhs_ty (go (typeKind ty))
       | otherwise = lhs_ty
        where
         lhs_ty = nlHsTyConApp (getRdrName tc) (map go args')
@@ -695,7 +703,7 @@ The derived Eq instance for Glurp (without any kind signatures) would be:
   instance Eq a => Eq (Glurp a) where
     (==) = coerce @(Wat 'Proxy -> Wat 'Proxy -> Bool)
                   @(Glurp a    -> Glurp a    -> Bool)
-                  (==)
+                  (==) :: Glurp a -> Glurp a -> Bool
 
 (Where the visible type applications use types produced by typeToLHsType.)
 
@@ -855,8 +863,8 @@ mkMatch ctxt pats expr lbinds
                  , m_pats  = map paren pats
                  , m_grhss = GRHSs noExt (unguardedRHS noSrcSpan expr) lbinds })
   where
-    paren lp@(L l p) | hsPatNeedsParens p = L l (ParPat noExt lp)
-                     | otherwise          = lp
+    paren lp@(L l p) | patNeedsParens appPrec p = L l (ParPat noExt lp)
+                     | otherwise                = lp
 
 {-
 ************************************************************************
@@ -995,7 +1003,7 @@ collect_bind omitPatSyn (PatSynBind _ (PSB { psb_id = L _ ps })) acc
 collect_bind _ (PatSynBind _ (XPatSynBind _)) acc = acc
 collect_bind _ (XHsBindsLR _) acc = acc
 
-collectMethodBinders :: LHsBindsLR GhcPs idR -> [Located RdrName]
+collectMethodBinders :: LHsBindsLR idL idR -> [Located (IdP idL)]
 -- Used exclusively for the bindings of an instance decl which are all FunBinds
 collectMethodBinders binds = foldrBag (get . unLoc) [] binds
   where
@@ -1027,7 +1035,11 @@ collectStmtBinders (ParStmt _ xs _ _)      = collectLStmtsBinders
                                     $ [s | ParStmtBlock _ ss _ _ <- xs, s <- ss]
 collectStmtBinders (TransStmt { trS_stmts = stmts }) = collectLStmtsBinders stmts
 collectStmtBinders (RecStmt { recS_stmts = ss })     = collectLStmtsBinders ss
-collectStmtBinders ApplicativeStmt{} = []
+collectStmtBinders (ApplicativeStmt _ args _) = concatMap collectArgBinders args
+ where
+  collectArgBinders (_, ApplicativeArgOne _ pat _ _) = collectPatBinders pat
+  collectArgBinders (_, ApplicativeArgMany _ _ _ pat) = collectPatBinders pat
+  collectArgBinders _ = []
 collectStmtBinders XStmtLR{} = panic "collectStmtBinders"
 
 
@@ -1052,7 +1064,6 @@ collect_lpat (L _ pat) bndrs
     go (ParPat _ pat)             = collect_lpat pat bndrs
 
     go (ListPat _ pats)           = foldr collect_lpat bndrs pats
-    go (PArrPat _ pats)           = foldr collect_lpat bndrs pats
     go (TuplePat _ pats _)        = foldr collect_lpat bndrs pats
     go (SumPat _ pat _ _)         = collect_lpat pat bndrs
 
@@ -1063,7 +1074,7 @@ collect_lpat (L _ pat) bndrs
     go (NPat {})                    = bndrs
     go (NPlusKPat _ (L _ n) _ _ _ _)= n : bndrs
 
-    go (SigPat _ pat)               = collect_lpat pat bndrs
+    go (SigPat _ pat _)             = collect_lpat pat bndrs
 
     go (SplicePat _ (HsSpliced _ _ (HsSplicedPat pat)))
                                   = go pat
@@ -1343,10 +1354,9 @@ lPatImplicits = hs_lpat
     hs_pat (ViewPat _ _ pat)    = hs_lpat pat
     hs_pat (ParPat _ pat)       = hs_lpat pat
     hs_pat (ListPat _ pats)     = hs_lpats pats
-    hs_pat (PArrPat _ pats)     = hs_lpats pats
     hs_pat (TuplePat _ pats _)  = hs_lpats pats
 
-    hs_pat (SigPat _ pat)       = hs_lpat pat
+    hs_pat (SigPat _ pat _)     = hs_lpat pat
     hs_pat (CoPat _ _ pat _)    = hs_pat pat
 
     hs_pat (ConPatIn _ ps)           = details ps

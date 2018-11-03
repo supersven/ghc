@@ -8,8 +8,9 @@ Core pass to saturate constructors and PrimOps
 {-# LANGUAGE BangPatterns, CPP, MultiWayIf #-}
 
 module CorePrep (
-      corePrepPgm, corePrepExpr, cvtLitInteger,
-      lookupMkIntegerName, lookupIntegerSDataConName
+      corePrepPgm, corePrepExpr, cvtLitInteger, cvtLitNatural,
+      lookupMkIntegerName, lookupIntegerSDataConName,
+      lookupMkNaturalName, lookupNaturalSDataConName
   ) where
 
 #include "HsVersions.h"
@@ -42,7 +43,6 @@ import Id
 import IdInfo
 import TysWiredIn
 import DataCon
-import PrimOp
 import BasicTypes
 import Module
 import UniqSupply
@@ -122,11 +122,13 @@ The goal of this pass is to prepare for code generation.
     special case where we use the S# constructor for Integers that
     are in the range of Int.
 
-11. Uphold tick consistency while doing this: We move ticks out of
+11. Same for LitNatural.
+
+12. Uphold tick consistency while doing this: We move ticks out of
     (non-type) applications where we can, and make sure that we
     annotate according to scoping rules when floating.
 
-12. Collect cost centres (including cost centres in unfoldings) if we're in
+13. Collect cost centres (including cost centres in unfoldings) if we're in
     profiling mode. We have to do this here beucase we won't have unfoldings
     after this pass (see `zapUnfolding` and Note [Drop unfoldings and rules].
 
@@ -608,9 +610,12 @@ cpeRhsE :: CorePrepEnv -> CoreExpr -> UniqSM (Floats, CpeRhs)
 
 cpeRhsE _env expr@(Type {})      = return (emptyFloats, expr)
 cpeRhsE _env expr@(Coercion {})  = return (emptyFloats, expr)
-cpeRhsE env (Lit (LitInteger i _))
+cpeRhsE env (Lit (LitNumber LitNumInteger i _))
     = cpeRhsE env (cvtLitInteger (cpe_dynFlags env) (getMkIntegerId env)
                    (cpe_integerSDataCon env) i)
+cpeRhsE env (Lit (LitNumber LitNumNatural i _))
+    = cpeRhsE env (cvtLitNatural (cpe_dynFlags env) (getMkNaturalId env)
+                   (cpe_naturalSDataCon env) i)
 cpeRhsE _env expr@(Lit {}) = return (emptyFloats, expr)
 cpeRhsE env expr@(Var {})  = cpeApp env expr
 cpeRhsE env expr@(App {}) = cpeApp env expr
@@ -691,6 +696,24 @@ cvtLitInteger dflags mk_integer _ i
                   high = x `shiftR` bits
               in mkConApp intDataCon [Lit (mkMachInt dflags low)] : f high
         bits = 31
+        mask = 2 ^ bits - 1
+
+cvtLitNatural :: DynFlags -> Id -> Maybe DataCon -> Integer -> CoreExpr
+-- Here we convert a literal Natural to the low-level
+-- representation.
+-- See Note [Natural literals] in Literal
+cvtLitNatural dflags _ (Just sdatacon) i
+  | inWordRange dflags i -- Special case for small naturals
+    = mkConApp sdatacon [Lit (mkMachWord dflags i)]
+
+cvtLitNatural dflags mk_natural _ i
+    = mkApps (Var mk_natural) [words]
+  where words = mkListExpr wordTy (f i)
+        f 0 = []
+        f x = let low  = x .&. mask
+                  high = x `shiftR` bits
+              in mkConApp wordDataCon [Lit (mkMachWord dflags low)] : f high
+        bits = 32
         mask = 2 ^ bits - 1
 
 -- ---------------------------------------------------------------------------
@@ -1047,10 +1070,6 @@ The type is the type of the entire application
 
 maybeSaturate :: Id -> CpeApp -> Int -> UniqSM CpeRhs
 maybeSaturate fn expr n_args
-  | Just DataToTagOp <- isPrimOpId_maybe fn     -- DataToTag must have an evaluated arg
-                                                -- A gruesome special case
-  = saturateDataToTag sat_expr
-
   | hasNoBinding fn        -- There's no binding
   = return sat_expr
 
@@ -1061,52 +1080,7 @@ maybeSaturate fn expr n_args
     excess_arity = fn_arity - n_args
     sat_expr     = cpeEtaExpand excess_arity expr
 
--------------
-saturateDataToTag :: CpeApp -> UniqSM CpeApp
--- See Note [dataToTag magic]
-saturateDataToTag sat_expr
-  = do { let (eta_bndrs, eta_body) = collectBinders sat_expr
-       ; eta_body' <- eval_data2tag_arg eta_body
-       ; return (mkLams eta_bndrs eta_body') }
-  where
-    eval_data2tag_arg :: CpeApp -> UniqSM CpeBody
-    eval_data2tag_arg app@(fun `App` arg)
-        | exprIsHNF arg         -- Includes nullary constructors
-        = return app            -- The arg is evaluated
-        | otherwise                     -- Arg not evaluated, so evaluate it
-        = do { arg_id <- newVar (exprType arg)
-             ; let arg_id1 = setIdUnfolding arg_id evaldUnfolding
-             ; return (Case arg arg_id1 (exprType app)
-                            [(DEFAULT, [], fun `App` Var arg_id1)]) }
-
-    eval_data2tag_arg (Tick t app)    -- Scc notes can appear
-        = do { app' <- eval_data2tag_arg app
-             ; return (Tick t app') }
-
-    eval_data2tag_arg other     -- Should not happen
-        = pprPanic "eval_data2tag" (ppr other)
-
-{- Note [dataToTag magic]
-~~~~~~~~~~~~~~~~~~~~~~~~~
-We must ensure that the arg of data2TagOp is evaluated. So
-in general CorePrep does this transformation:
-  data2tag e   -->   case e of y -> data2tag y
-(yuk yuk) take into account the lambdas we've now introduced
-
-How might it not be evaluated?  Well, we might have floated it out
-of the scope of a `seq`, or dropped the `seq` altogether.
-
-We only do this if 'e' is not a WHNF.  But if it's a simple
-variable (common case) we need to know its evaluated-ness flag.
-Example:
-   data T = MkT !Bool
-   f v = case v of
-           MkT y -> dataToTag# y
-Here we don't want to generate an extra case on 'y', because it's
-already evaluated.  So we want to keep the evaluated-ness flag
-on y.  See Note [Preserve evaluated-ness in CorePrep].
-
-
+{-
 ************************************************************************
 *                                                                      *
                 Simple CoreSyn operations
@@ -1388,8 +1362,8 @@ canFloatFromNoCaf platform (Floats ok_to_spec fs) rhs
     -- the new binding is static. However it can't mention
     -- any non-static things or it would *already* be Caffy
     rhs_ok = rhsIsStatic platform (\_ -> False)
-                         (\i -> pprPanic "rhsIsStatic" (integer i))
-                         -- Integer literals should not show up
+                         (\_nt i -> pprPanic "rhsIsStatic" (integer i))
+                         -- Integer or Natural literals should not show up
 
 wantFloatNested :: RecFlag -> Demand -> Bool -> Floats -> CpeRhs -> Bool
 wantFloatNested is_rec dmd is_unlifted floats rhs
@@ -1498,7 +1472,9 @@ data CorePrepEnv
         --      see Note [lazyId magic], Note [Inlining in CorePrep]
         --      and Note [CorePrep inlines trivial CoreExpr not Id] (#12076)
         , cpe_mkIntegerId     :: Id
+        , cpe_mkNaturalId     :: Id
         , cpe_integerSDataCon :: Maybe DataCon
+        , cpe_naturalSDataCon :: Maybe DataCon
     }
 
 lookupMkIntegerName :: DynFlags -> HscEnv -> IO Id
@@ -1506,13 +1482,25 @@ lookupMkIntegerName dflags hsc_env
     = guardIntegerUse dflags $ liftM tyThingId $
       lookupGlobal hsc_env mkIntegerName
 
+lookupMkNaturalName :: DynFlags -> HscEnv -> IO Id
+lookupMkNaturalName dflags hsc_env
+    = guardNaturalUse dflags $ liftM tyThingId $
+      lookupGlobal hsc_env mkNaturalName
+
+-- See Note [The integer library] in PrelNames
 lookupIntegerSDataConName :: DynFlags -> HscEnv -> IO (Maybe DataCon)
-lookupIntegerSDataConName dflags hsc_env = case cIntegerLibraryType of
+lookupIntegerSDataConName dflags hsc_env = case integerLibrary dflags of
     IntegerGMP -> guardIntegerUse dflags $ liftM (Just . tyThingDataCon) $
                   lookupGlobal hsc_env integerSDataConName
     IntegerSimple -> return Nothing
 
--- | Helper for 'lookupMkIntegerName' and 'lookupIntegerSDataConName'
+lookupNaturalSDataConName :: DynFlags -> HscEnv -> IO (Maybe DataCon)
+lookupNaturalSDataConName dflags hsc_env = case integerLibrary dflags of
+    IntegerGMP -> guardNaturalUse dflags $ liftM (Just . tyThingDataCon) $
+                  lookupGlobal hsc_env naturalSDataConName
+    IntegerSimple -> return Nothing
+
+-- | Helper for 'lookupMkIntegerName', 'lookupIntegerSDataConName'
 guardIntegerUse :: DynFlags -> IO a -> IO a
 guardIntegerUse dflags act
   | thisPackage dflags == primUnitId
@@ -1521,15 +1509,33 @@ guardIntegerUse dflags act
   = return $ panic "Can't use Integer in integer-*"
   | otherwise = act
 
+-- | Helper for 'lookupMkNaturalName', 'lookupNaturalSDataConName'
+--
+-- Just like we can't use Integer literals in `integer-*`, we can't use Natural
+-- literals in `base`. If we do, we get interface loading error for GHC.Natural.
+guardNaturalUse :: DynFlags -> IO a -> IO a
+guardNaturalUse dflags act
+  | thisPackage dflags == primUnitId
+  = return $ panic "Can't use Natural in ghc-prim"
+  | thisPackage dflags == integerUnitId
+  = return $ panic "Can't use Natural in integer-*"
+  | thisPackage dflags == baseUnitId
+  = return $ panic "Can't use Natural in base"
+  | otherwise = act
+
 mkInitialCorePrepEnv :: DynFlags -> HscEnv -> IO CorePrepEnv
 mkInitialCorePrepEnv dflags hsc_env
     = do mkIntegerId <- lookupMkIntegerName dflags hsc_env
+         mkNaturalId <- lookupMkNaturalName dflags hsc_env
          integerSDataCon <- lookupIntegerSDataConName dflags hsc_env
+         naturalSDataCon <- lookupNaturalSDataConName dflags hsc_env
          return $ CPE {
                       cpe_dynFlags = dflags,
                       cpe_env = emptyVarEnv,
                       cpe_mkIntegerId = mkIntegerId,
-                      cpe_integerSDataCon = integerSDataCon
+                      cpe_mkNaturalId = mkNaturalId,
+                      cpe_integerSDataCon = integerSDataCon,
+                      cpe_naturalSDataCon = naturalSDataCon
                   }
 
 extendCorePrepEnv :: CorePrepEnv -> Id -> Id -> CorePrepEnv
@@ -1554,6 +1560,9 @@ lookupCorePrepEnv cpe id
 getMkIntegerId :: CorePrepEnv -> Id
 getMkIntegerId = cpe_mkIntegerId
 
+getMkNaturalId :: CorePrepEnv -> Id
+getMkNaturalId = cpe_mkNaturalId
+
 ------------------------------------------------------------------------------
 -- Cloning binders
 -- ---------------------------------------------------------------------------
@@ -1571,7 +1580,7 @@ cpCloneBndr env bndr
 
        -- Drop (now-useless) rules/unfoldings
        -- See Note [Drop unfoldings and rules]
-       -- and Note [Preserve evaluated-ness in CorePrep]
+       -- and Note [Preserve evaluatedness] in CoreTidy
        ; let unfolding' = zapUnfolding (realIdUnfolding bndr)
                           -- Simplifier will set the Id's unfolding
 
@@ -1603,21 +1612,8 @@ We want to drop the unfolding/rules on every Id:
   - We are changing uniques, so if we didn't discard unfoldings/rules
     we'd have to substitute in them
 
-HOWEVER, we want to preserve evaluated-ness; see
-Note [Preserve evaluated-ness in CorePrep]
-
-Note [Preserve evaluated-ness in CorePrep]
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We want to preserve the evaluated-ness of each binder (via
-evaldUnfolding) for two reasons
-
-* In the code generator if we have
-     case x of y { Red -> e1; DEFAULT -> y }
-  we can return 'y' rather than entering it, if we know
-  it is evaluated (Trac #14626)
-
-* In the DataToTag magic (in CorePrep itself) we rely on
-  evaluated-ness.  See Note Note [dataToTag magic].
+HOWEVER, we want to preserve evaluated-ness;
+see Note [Preserve evaluatedness] in CoreTidy.
 -}
 
 ------------------------------------------------------------------------------

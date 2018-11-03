@@ -36,7 +36,7 @@ import Module
 import Name             ( isExternalName, nameOccName, nameModule_maybe )
 import OccName          ( occNameFS )
 import BasicTypes       ( Arity )
-import TysWiredIn       ( unboxedUnitDataCon )
+import TysWiredIn       ( unboxedUnitDataCon, unitDataConId )
 import Literal
 import Outputable
 import MonadUtils
@@ -131,15 +131,6 @@ import Control.Monad (liftM, ap)
 --
 -- The CafInfo has already been calculated during the CoreTidy pass.
 --
--- During CoreToStg, we then pin onto each binding and case expression, a
--- list of Ids which represents the "live" CAFs at that point.  The meaning
--- of "live" here is the same as for live variables, see above (which is
--- why it's convenient to collect CAF information here rather than elsewhere).
---
--- The later SRT pass takes these lists of Ids and uses them to construct
--- the actual nested SRTs, and replaces the lists of Ids with (offset,length)
--- pairs.
-
 -- Note [What is a non-escaping let]
 -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 --
@@ -399,10 +390,15 @@ coreToStgExpr
 -- on these components, but it in turn is not scrutinised as the basis for any
 -- decisions.  Hence no black holes.
 
--- No LitInteger's should be left by the time this is called. CorePrep
--- should have converted them all to a real core representation.
-coreToStgExpr (Lit (LitInteger {})) = panic "coreToStgExpr: LitInteger"
+-- No LitInteger's or LitNatural's should be left by the time this is called.
+-- CorePrep should have converted them all to a real core representation.
+coreToStgExpr (Lit (LitNumber LitNumInteger _ _)) = panic "coreToStgExpr: LitInteger"
+coreToStgExpr (Lit (LitNumber LitNumNatural _ _)) = panic "coreToStgExpr: LitNatural"
 coreToStgExpr (Lit l)      = return (StgLit l, emptyFVInfo)
+coreToStgExpr (App (Lit RubbishLit) _some_unlifted_type)
+  -- We lower 'RubbishLit' to @()@ here, which is much easier than doing it in
+  -- a STG to Cmm pass.
+  = coreToStgExpr (Var unitDataConId)
 coreToStgExpr (Var v)      = coreToStgApp Nothing v               [] []
 coreToStgExpr (Coercion _) = coreToStgApp Nothing coercionTokenId [] []
 
@@ -1101,9 +1097,9 @@ myCollectBinders expr
     go bs (Cast e _)         = go bs e
     go bs e                  = (reverse bs, e)
 
+-- | Precondition: argument expression is an 'App', and there is a 'Var' at the
+-- head of the 'App' chain.
 myCollectArgs :: CoreExpr -> (Id, [CoreArg], [Tickish Id])
-        -- We assume that we only have variables
-        -- in the function position by now
 myCollectArgs expr
   = go expr [] []
   where

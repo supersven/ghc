@@ -53,7 +53,7 @@ import Name
 import VarSet
 import Rules
 import VarEnv
-import Var( EvVar )
+import Var( EvVar, varType )
 import Outputable
 import Module
 import SrcLoc
@@ -64,6 +64,7 @@ import BasicTypes
 import DynFlags
 import FastString
 import Util
+import UniqSet( nonDetEltsUniqSet )
 import MonadUtils
 import qualified GHC.LanguageExtensions as LangExt
 import Control.Monad
@@ -181,10 +182,11 @@ dsHsBind dflags (AbsBinds { abs_tvs = tyvars, abs_ev_vars = dicts
                           , abs_exports = exports
                           , abs_ev_binds = ev_binds
                           , abs_binds = binds, abs_sig = has_sig })
-  = do { ds_binds <- addDictsDs (toTcTypeBag (listToBag dicts)) $
+  = do { ds_binds <- addDictsDs (listToBag dicts) $
                      dsLHsBinds binds
-                                   -- addDictsDs: push type constraints deeper
-                                   --             for inner pattern match check
+                         -- addDictsDs: push type constraints deeper
+                         --             for inner pattern match check
+                         -- See Check, Note [Type and Term Equality Propagation]
 
        ; ds_ev_binds <- dsTcEvBinds_s ev_binds
 
@@ -681,14 +683,14 @@ dsSpec mb_poly_rhs (L loc (SpecPrag poly_id spec_co spec_inl))
        ; -- pprTrace "dsRule" (vcat [ text "Id:" <+> ppr poly_id
          --                         , text "spec_co:" <+> ppr spec_co
          --                         , text "ds_rhs:" <+> ppr ds_lhs ]) $
-         case decomposeRuleLhs spec_bndrs ds_lhs of {
+         dflags <- getDynFlags
+       ; case decomposeRuleLhs dflags spec_bndrs ds_lhs of {
            Left msg -> do { warnDs NoReason msg; return Nothing } ;
            Right (rule_bndrs, _fn, args) -> do
 
-       { dflags <- getDynFlags
-       ; this_mod <- getModule
+       { this_mod <- getModule
        ; let fn_unf    = realIdUnfolding poly_id
-             spec_unf  = specUnfolding spec_bndrs core_app arity_decrease fn_unf
+             spec_unf  = specUnfolding dflags spec_bndrs core_app arity_decrease fn_unf
              spec_id   = mkLocalId spec_name spec_ty
                             `setInlinePragma` inl_prag
                             `setIdUnfolding`  spec_unf
@@ -820,14 +822,15 @@ SPEC f :: ty                [n]   INLINE [k]
 ************************************************************************
 -}
 
-decomposeRuleLhs :: [Var] -> CoreExpr -> Either SDoc ([Var], Id, [CoreExpr])
+decomposeRuleLhs :: DynFlags -> [Var] -> CoreExpr
+                 -> Either SDoc ([Var], Id, [CoreExpr])
 -- (decomposeRuleLhs bndrs lhs) takes apart the LHS of a RULE,
 -- The 'bndrs' are the quantified binders of the rules, but decomposeRuleLhs
 -- may add some extra dictionary binders (see Note [Free dictionaries])
 --
 -- Returns an error message if the LHS isn't of the expected shape
 -- Note [Decomposing the left-hand side of a RULE]
-decomposeRuleLhs orig_bndrs orig_lhs
+decomposeRuleLhs dflags orig_bndrs orig_lhs
   | not (null unbound)    -- Check for things unbound on LHS
                           -- See Note [Unused spec binders]
   = Left (vcat (map dead_msg unbound))
@@ -848,7 +851,7 @@ decomposeRuleLhs orig_bndrs orig_lhs
   = Left bad_shape_msg
  where
    lhs1         = drop_dicts orig_lhs
-   lhs2         = simpleOptExpr lhs1  -- See Note [Simplify rule LHS]
+   lhs2         = simpleOptExpr dflags lhs1  -- See Note [Simplify rule LHS]
    (fun2,args2) = collectArgs lhs2
 
    lhs_fvs    = exprFreeVars lhs2
@@ -859,7 +862,7 @@ decomposeRuleLhs orig_bndrs orig_lhs
         -- Add extra tyvar binders: Note [Free tyvars in rule LHS]
         -- and extra dict binders: Note [Free dictionaries in rule LHS]
    mk_extra_bndrs fn_id args
-     = toposortTyVars unbound_tvs ++ unbound_dicts
+     = scopedSort unbound_tvs ++ unbound_dicts
      where
        unbound_tvs   = [ v | v <- unbound_vars, isTyVar v ]
        unbound_dicts = [ mkLocalId (localiseName (idName d)) (idType d)
@@ -885,9 +888,9 @@ decomposeRuleLhs orig_bndrs orig_lhs
                               , text "Orig lhs:" <+> ppr orig_lhs
                               , text "optimised lhs:" <+> ppr lhs2 ])
    pp_bndr bndr
-    | isTyVar bndr                      = text "type variable" <+> quotes (ppr bndr)
-    | Just pred <- evVarPred_maybe bndr = text "constraint" <+> quotes (ppr pred)
-    | otherwise                         = text "variable" <+> quotes (ppr bndr)
+    | isTyVar bndr = text "type variable" <+> quotes (ppr bndr)
+    | isEvVar bndr = text "constraint"    <+> quotes (ppr (varType bndr))
+    | otherwise    = text "variable"      <+> quotes (ppr bndr)
 
    constructor_msg con = vcat
      [ text "A constructor," <+> ppr con <>
@@ -1144,14 +1147,38 @@ dsTcEvBinds (TcEvBinds {}) = panic "dsEvBinds"    -- Zonker has got rid of this
 dsTcEvBinds (EvBinds bs)   = dsEvBinds bs
 
 dsEvBinds :: Bag EvBind -> DsM [CoreBind]
-dsEvBinds bs = mapM ds_scc (sccEvBinds bs)
+dsEvBinds bs
+  = do { ds_bs <- mapBagM dsEvBind bs
+       ; return (mk_ev_binds ds_bs) }
+
+mk_ev_binds :: Bag (Id,CoreExpr) -> [CoreBind]
+-- We do SCC analysis of the evidence bindings, /after/ desugaring
+-- them. This is convenient: it means we can use the CoreSyn
+-- free-variable functions rather than having to do accurate free vars
+-- for EvTerm.
+mk_ev_binds ds_binds
+  = map ds_scc (stronglyConnCompFromEdgedVerticesUniq edges)
   where
-    ds_scc (AcyclicSCC (EvBind { eb_lhs = v, eb_rhs = r}))
-                          = liftM (NonRec v) (dsEvTerm r)
-    ds_scc (CyclicSCC bs) = liftM Rec (mapM dsEvBind bs)
+    edges :: [ Node EvVar (EvVar,CoreExpr) ]
+    edges = foldrBag ((:) . mk_node) [] ds_binds
+
+    mk_node :: (Id, CoreExpr) -> Node EvVar (EvVar,CoreExpr)
+    mk_node b@(var, rhs)
+      = DigraphNode { node_payload = b
+                    , node_key = var
+                    , node_dependencies = nonDetEltsUniqSet $
+                                          exprFreeVars rhs `unionVarSet`
+                                          coVarsOfType (varType var) }
+      -- It's OK to use nonDetEltsUniqSet here as stronglyConnCompFromEdgedVertices
+      -- is still deterministic even if the edges are in nondeterministic order
+      -- as explained in Note [Deterministic SCC] in Digraph.
+
+    ds_scc (AcyclicSCC (v,r)) = NonRec v r
+    ds_scc (CyclicSCC prs)    = Rec prs
 
 dsEvBind :: EvBind -> DsM (Id, CoreExpr)
 dsEvBind (EvBind { eb_lhs = v, eb_rhs = r}) = liftM ((,) v) (dsEvTerm r)
+
 
 {-**********************************************************************
 *                                                                      *
@@ -1162,6 +1189,13 @@ dsEvBind (EvBind { eb_lhs = v, eb_rhs = r}) = liftM ((,) v) (dsEvTerm r)
 dsEvTerm :: EvTerm -> DsM CoreExpr
 dsEvTerm (EvExpr e)          = return e
 dsEvTerm (EvTypeable ty ev)  = dsEvTypeable ty ev
+dsEvTerm (EvFun { et_tvs = tvs, et_given = given
+                , et_binds = ev_binds, et_body = wanted_id })
+  = do { ds_ev_binds <- dsTcEvBinds ev_binds
+       ; return $ (mkLams (tvs ++ given) $
+                   mkCoreLets ds_ev_binds $
+                   Var wanted_id) }
+
 
 {-**********************************************************************
 *                                                                      *
@@ -1246,8 +1280,9 @@ ds_ev_typeable ty (EvTypeableTrFun ev1 ev2)
        }
 
 ds_ev_typeable ty (EvTypeableTyLit ev)
-  = do { fun  <- dsLookupGlobalId tr_fun
-       ; dict <- dsEvTerm ev       -- Of type KnownNat/KnownSym
+  = -- See Note [Typeable for Nat and Symbol] in TcInteract
+    do { fun  <- dsLookupGlobalId tr_fun
+       ; dict <- dsEvTerm ev       -- Of type KnownNat/KnownSymbol
        ; let proxy = mkTyApps (Var proxyHashId) [ty_kind, ty]
        ; return (mkApps (mkTyApps (Var fun) [ty]) [ dict, proxy ]) }
   where

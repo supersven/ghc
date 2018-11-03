@@ -2,6 +2,12 @@
 -- Make sure that not enabling MonadFail warnings makes code compile just
 -- as it did in < 8.0
 
+-- NOTE: starting w/ GHC 8.6 sugaring is turned on by default; so we have
+--       to disable to keep supporting this test-case
+--
+{-# LANGUAGE NoMonadFailDesugaring #-}
+{-# OPTIONS -Wno-missing-monadfail-instances #-}
+
 module MonadFailWarnings where
 
 import Control.Monad.Fail

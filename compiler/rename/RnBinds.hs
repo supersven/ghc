@@ -226,7 +226,7 @@ rnIPBind :: IPBind GhcPs -> RnM (IPBind GhcRn, FreeVars)
 rnIPBind (IPBind _ ~(Left n) expr) = do
     (expr',fvExpr) <- rnLExpr expr
     return (IPBind noExt (Left n) expr', fvExpr)
-rnIPBind (XCIPBind _) = panic "rnIPBind"
+rnIPBind (XIPBind _) = panic "rnIPBind"
 
 {-
 ************************************************************************
@@ -296,7 +296,7 @@ rnValBindsRHS :: HsSigCtxt
 
 rnValBindsRHS ctxt (ValBinds _ mbinds sigs)
   = do { (sigs', sig_fvs) <- renameSigs ctxt sigs
-       ; binds_w_dus <- mapBagM (rnLBind (mkSigTvFn sigs')) mbinds
+       ; binds_w_dus <- mapBagM (rnLBind (mkScopedTvFn sigs')) mbinds
        ; let !(anal_binds, anal_dus) = depAnalBinds binds_w_dus
 
        ; let patsyn_fvs = foldr (unionNameSet . psb_ext) emptyNameSet $
@@ -470,9 +470,10 @@ rnBind _ bind@(PatBind { pat_lhs = pat
               ok_nobind_pat
                   = -- See Note [Pattern bindings that bind no variables]
                     case pat of
-                       L _ (WildPat {}) -> True
-                       L _ (BangPat {}) -> True -- #9127, #13646
-                       _                -> False
+                       L _ (WildPat {})   -> True
+                       L _ (BangPat {})   -> True -- #9127, #13646
+                       L _ (SplicePat {}) -> True
+                       _                  -> False
 
         -- Warn if the pattern binds no variables
         -- See Note [Pattern bindings that bind no variables]
@@ -518,7 +519,7 @@ rnBind _ b = pprPanic "rnBind" (ppr b)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Generally, we want to warn about pattern bindings like
   Just _ = e
-because they don't do anything!  But we have two exceptions:
+because they don't do anything!  But we have three exceptions:
 
 * A wildcard pattern
        _ = rhs
@@ -531,6 +532,12 @@ because they don't do anything!  But we have two exceptions:
   This can fail, so unlike the lazy variant, it is not a no-op.
   Moreover, Trac #13646 argues that even for single constructor
   types, you might want to write the constructor.  See also #9127.
+
+* A splice pattern
+      $(th-lhs) = rhs
+   It is impossible to determine whether or not th-lhs really
+   binds any variable. We should disable the warning for any pattern
+   which contain splices, but that is a more expensive check.
 
 Note [Free-variable space leak]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -574,21 +581,21 @@ depAnalBinds binds_w_dus
 
 ---------------------
 -- Bind the top-level forall'd type variables in the sigs.
--- E.g  f :: a -> a
+-- E.g  f :: forall a. a -> a
 --      f = rhs
 --      The 'a' scopes over the rhs
 --
 -- NB: there'll usually be just one (for a function binding)
 --     but if there are many, one may shadow the rest; too bad!
---      e.g  x :: [a] -> [a]
---           y :: [(a,a)] -> a
+--      e.g  x :: forall a. [a] -> [a]
+--           y :: forall a. [(a,a)] -> a
 --           (x,y) = e
 --      In e, 'a' will be in scope, and it'll be the one from 'y'!
 
-mkSigTvFn :: [LSig GhcRn] -> (Name -> [Name])
+mkScopedTvFn :: [LSig GhcRn] -> (Name -> [Name])
 -- Return a lookup function that maps an Id Name to the names
 -- of the type variables that should scope over its body.
-mkSigTvFn sigs = \n -> lookupNameEnv env n `orElse` []
+mkScopedTvFn sigs = \n -> lookupNameEnv env n `orElse` []
   where
     env = mkHsSigEnv get_scoped_tvs sigs
 
@@ -656,9 +663,9 @@ rnPatSynBind sig_fn bind@(PSB { psb_id = L l name
        -- invariant: no free vars here when it's a FunBind
   = do  { pattern_synonym_ok <- xoptM LangExt.PatternSynonyms
         ; unless pattern_synonym_ok (addErr patternSynonymErr)
-        ; let sig_tvs = sig_fn name
+        ; let scoped_tvs = sig_fn name
 
-        ; ((pat', details'), fvs1) <- bindSigTyVarsFV sig_tvs $
+        ; ((pat', details'), fvs1) <- bindSigTyVarsFV scoped_tvs $
                                       rnPat PatSyn pat $ \pat' ->
          -- We check the 'RdrName's instead of the 'Name's
          -- so that the binding locations are reported
@@ -693,7 +700,7 @@ rnPatSynBind sig_fn bind@(PSB { psb_id = L l name
             Unidirectional -> return (Unidirectional, emptyFVs)
             ImplicitBidirectional -> return (ImplicitBidirectional, emptyFVs)
             ExplicitBidirectional mg ->
-                do { (mg', fvs) <- bindSigTyVarsFV sig_tvs $
+                do { (mg', fvs) <- bindSigTyVarsFV scoped_tvs $
                                    rnMatchGroup (mkPrefixFunRhs (L l name))
                                                 rnLExpr mg
                    ; return (ExplicitBidirectional mg', fvs) }
@@ -860,7 +867,7 @@ rnMethodBinds is_cls_decl cls ktv_names binds sigs
        -- Answer no in Haskell 2010, but yes if you have -XScopedTypeVariables
        ; scoped_tvs  <- xoptM LangExt.ScopedTypeVariables
        ; (binds'', bind_fvs) <- maybe_extend_tyvar_env scoped_tvs $
-              do { binds_w_dus <- mapBagM (rnLBind (mkSigTvFn other_sigs')) binds'
+              do { binds_w_dus <- mapBagM (rnLBind (mkScopedTvFn other_sigs')) binds'
                  ; let bind_fvs = foldrBag (\(_,_,fv1) fv2 -> fv1 `plusFV` fv2)
                                            emptyFVs binds_w_dus
                  ; return (mapBag fstOf3 binds_w_dus, bind_fvs) }
@@ -951,7 +958,7 @@ renameSig _ (IdSig _ x)
 renameSig ctxt sig@(TypeSig _ vs ty)
   = do  { new_vs <- mapM (lookupSigOccRn ctxt sig) vs
         ; let doc = TypeSigCtx (ppr_sig_bndrs vs)
-        ; (new_ty, fvs) <- rnHsSigWcType doc ty
+        ; (new_ty, fvs) <- rnHsSigWcType BindUnlessForall doc ty
         ; return (TypeSig noExt new_vs new_ty, fvs) }
 
 renameSig ctxt sig@(ClassOpSig _ is_deflt vs ty)

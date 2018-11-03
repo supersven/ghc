@@ -15,7 +15,6 @@
 {-# LANGUAGE StandaloneDeriving         #-}
 {-# LANGUAGE Trustworthy                #-}
 {-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeInType                 #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
 {-# LANGUAGE UndecidableInstances       #-}
@@ -106,7 +105,7 @@ module GHC.Generics  (
 -- This is a lot of information! However, most of it is actually merely meta-information
 -- that makes names of datatypes and constructors and more available on the type level.
 --
--- Here is a reduced representation for 'Tree' with nearly all meta-information removed,
+-- Here is a reduced representation for @Tree@ with nearly all meta-information removed,
 -- for now keeping only the most essential aspects:
 --
 -- @
@@ -190,7 +189,7 @@ module GHC.Generics  (
 --
 -- Here, 'R' is a type-level proxy that does not have any associated values.
 --
--- There used to be another variant of 'K1' (namely 'Par0'), but it has since
+-- There used to be another variant of 'K1' (namely @Par0@), but it has since
 -- been deprecated.
 
 -- *** Meta information: 'M1'
@@ -274,7 +273,7 @@ module GHC.Generics  (
 --       between the original value and its `Rep`-based representation and then invokes the
 --       generic instances.
 --
--- As an example, let us look at a function 'encode' that produces a naive, but lossless
+-- As an example, let us look at a function @encode@ that produces a naive, but lossless
 -- bit encoding of values of various datatypes. So we are aiming to define a function
 --
 -- @
@@ -368,18 +367,15 @@ module GHC.Generics  (
 -- @
 --
 -- The case for 'K1' is rather interesting. Here, we call the final function
--- 'encode' that we yet have to define, recursively. We will use another type
--- class 'Encode' for that function:
+-- @encode@ that we yet have to define, recursively. We will use another type
+-- class @Encode@ for that function:
 --
 -- @
 -- instance (Encode c) => Encode' ('K1' i c) where
 --   encode' ('K1' x) = encode x
 -- @
 --
--- Note how 'Par0' and 'Rec0' both being mapped to 'K1' allows us to define
--- a uniform instance here.
---
--- Similarly, we can define a uniform instance for 'M1', because we completely
+-- Note how we can define a uniform instance for 'M1', because we completely
 -- disregard all meta-information:
 --
 -- @
@@ -387,13 +383,13 @@ module GHC.Generics  (
 --   encode' ('M1' x) = encode' x
 -- @
 --
--- Unlike in 'K1', the instance for 'M1' refers to 'encode'', not 'encode'.
+-- Unlike in 'K1', the instance for 'M1' refers to @encode'@, not @encode@.
 
 -- *** The wrapper and generic default
 --
 -- |
 --
--- We now define class 'Encode' for the actual 'encode' function:
+-- We now define class @Encode@ for the actual @encode@ function:
 --
 -- @
 -- class Encode a where
@@ -402,9 +398,9 @@ module GHC.Generics  (
 --   encode x = encode' ('from' x)
 -- @
 --
--- The incoming 'x' is converted using 'from', then we dispatch to the
--- generic instances using 'encode''. We use this as a default definition
--- for 'encode'. We need the 'default encode' signature because ordinary
+-- The incoming @x@ is converted using 'from', then we dispatch to the
+-- generic instances using @encode'@. We use this as a default definition
+-- for @encode@. We need the @default encode@ signature because ordinary
 -- Haskell default methods must not introduce additional class constraints,
 -- but our generic default does.
 --
@@ -422,10 +418,10 @@ module GHC.Generics  (
 -- possible to use @deriving Encode@ as well, but GHC does not yet support
 -- that syntax for this situation.
 --
--- Having 'Encode' as a class has the advantage that we can define
+-- Having @Encode@ as a class has the advantage that we can define
 -- non-generic special cases, which is particularly useful for abstract
 -- datatypes that have no structural representation. For example, given
--- a suitable integer encoding function 'encodeInt', we can define
+-- a suitable integer encoding function @encodeInt@, we can define
 --
 -- @
 -- instance Encode Int where
@@ -458,7 +454,7 @@ module GHC.Generics  (
 --      any datatype where each constructor has at least one field.
 --
 -- An 'M1' instance is always required (but it can just ignore the
--- meta-information, as is the case for 'encode' above).
+-- meta-information, as is the case for @encode@ above).
 #if 0
 -- *** Using meta-information
 --
@@ -471,14 +467,15 @@ module GHC.Generics  (
 -- |
 --
 -- Datatype-generic functions as defined above work for a large class
--- of datatypes, including parameterized datatypes. (We have used 'Tree'
+-- of datatypes, including parameterized datatypes. (We have used @Tree@
 -- as our example above, which is of kind @* -> *@.) However, the
 -- 'Generic' class ranges over types of kind @*@, and therefore, the
--- resulting generic functions (such as 'encode') must be parameterized
+-- resulting generic functions (such as @encode@) must be parameterized
 -- by a generic type argument of kind @*@.
 --
 -- What if we want to define generic classes that range over type
--- constructors (such as 'Functor', 'Traversable', or 'Foldable')?
+-- constructors (such as 'Data.Functor.Functor',
+-- 'Data.Traversable.Traversable', or 'Data.Foldable.Foldable')?
 
 -- *** The 'Generic1' class
 --
@@ -492,7 +489,7 @@ module GHC.Generics  (
 -- The 'Generic1' class is also derivable.
 --
 -- The representation 'Rep1' is ever so slightly different from 'Rep'.
--- Let us look at 'Tree' as an example again:
+-- Let us look at @Tree@ as an example again:
 --
 -- @
 -- data Tree a = Leaf a | Node (Tree a) (Tree a)
@@ -732,6 +729,7 @@ module GHC.Generics  (
 -- We use some base types
 import Data.Either ( Either (..) )
 import Data.Maybe  ( Maybe(..), fromMaybe )
+import Data.Ord    ( Down(..) )
 import GHC.Integer ( Integer, integerToInt )
 import GHC.Prim    ( Addr#, Char#, Double#, Float#, Int#, Word# )
 import GHC.Ptr     ( Ptr )
@@ -850,7 +848,7 @@ deriving instance Monoid p => Monoid (Par1 p)
 
 -- | Recursive calls of kind @* -> *@ (or kind @k -> *@, when @PolyKinds@
 -- is enabled)
-newtype Rec1 (f :: k -> *) (p :: k) = Rec1 { unRec1 :: f p }
+newtype Rec1 (f :: k -> Type) (p :: k) = Rec1 { unRec1 :: f p }
   deriving ( Eq       -- ^ @since 4.7.0.0
            , Ord      -- ^ @since 4.7.0.0
            , Read     -- ^ @since 4.7.0.0
@@ -880,7 +878,7 @@ deriving instance Semigroup (f p) => Semigroup (Rec1 f p)
 deriving instance Monoid (f p) => Monoid (Rec1 f p)
 
 -- | Constants, additional parameters and recursion of kind @*@
-newtype K1 (i :: *) c (p :: k) = K1 { unK1 :: c }
+newtype K1 (i :: Type) c (p :: k) = K1 { unK1 :: c }
   deriving ( Eq       -- ^ @since 4.7.0.0
            , Ord      -- ^ @since 4.7.0.0
            , Read     -- ^ @since 4.7.0.0
@@ -921,7 +919,8 @@ deriving instance Semigroup (f p) => Semigroup (M1 i c f p)
 deriving instance Monoid (f p) => Monoid (M1 i c f p)
 
 -- | Meta-information (constructor names, etc.)
-newtype M1 (i :: *) (c :: Meta) (f :: k -> *) (p :: k) = M1 { unM1 :: f p }
+newtype M1 (i :: Type) (c :: Meta) (f :: k -> Type) (p :: k) =
+    M1 { unM1 :: f p }
   deriving ( Eq       -- ^ @since 4.7.0.0
            , Ord      -- ^ @since 4.7.0.0
            , Read     -- ^ @since 4.7.0.0
@@ -933,7 +932,7 @@ newtype M1 (i :: *) (c :: Meta) (f :: k -> *) (p :: k) = M1 { unM1 :: f p }
 
 -- | Sums: encode choice between constructors
 infixr 5 :+:
-data (:+:) (f :: k -> *) (g :: k -> *) (p :: k) = L1 (f p) | R1 (g p)
+data (:+:) (f :: k -> Type) (g :: k -> Type) (p :: k) = L1 (f p) | R1 (g p)
   deriving ( Eq       -- ^ @since 4.7.0.0
            , Ord      -- ^ @since 4.7.0.0
            , Read     -- ^ @since 4.7.0.0
@@ -945,7 +944,7 @@ data (:+:) (f :: k -> *) (g :: k -> *) (p :: k) = L1 (f p) | R1 (g p)
 
 -- | Products: encode multiple arguments to constructors
 infixr 6 :*:
-data (:*:) (f :: k -> *) (g :: k -> *) (p :: k) = f p :*: g p
+data (:*:) (f :: k -> Type) (g :: k -> Type) (p :: k) = f p :*: g p
   deriving ( Eq       -- ^ @since 4.7.0.0
            , Ord      -- ^ @since 4.7.0.0
            , Read     -- ^ @since 4.7.0.0
@@ -986,7 +985,7 @@ instance (Monoid (f p), Monoid (g p)) => Monoid ((f :*: g) p) where
 
 -- | Composition of functors
 infixr 7 :.:
-newtype (:.:) (f :: k2 -> *) (g :: k1 -> k2) (p :: k1) =
+newtype (:.:) (f :: k2 -> Type) (g :: k1 -> k2) (p :: k1) =
     Comp1 { unComp1 :: f (g p) }
   deriving ( Eq       -- ^ @since 4.7.0.0
            , Ord      -- ^ @since 4.7.0.0
@@ -1018,7 +1017,7 @@ deriving instance Monoid (f (g p)) => Monoid ((f :.: g) p)
 -- | Constants of unlifted kinds
 --
 -- @since 4.9.0.0
-data family URec (a :: *) (p :: k)
+data family URec (a :: Type) (p :: k)
 
 -- | Used for marking occurrences of 'Addr#'
 --
@@ -1118,10 +1117,10 @@ type UInt    = URec Int
 -- @since 4.9.0.0
 type UWord   = URec Word
 
--- | Tag for K1: recursion (of kind @*@)
+-- | Tag for K1: recursion (of kind @Type@)
 data R
 
--- | Type synonym for encoding recursion (of kind @*@)
+-- | Type synonym for encoding recursion (of kind @Type@)
 type Rec0  = K1 R
 
 -- | Tag for M1: datatype
@@ -1143,17 +1142,17 @@ type S1 = M1 S
 -- | Class for datatypes that represent datatypes
 class Datatype d where
   -- | The name of the datatype (unqualified)
-  datatypeName :: t d (f :: k -> *) (a :: k) -> [Char]
+  datatypeName :: t d (f :: k -> Type) (a :: k) -> [Char]
   -- | The fully-qualified name of the module where the type is declared
-  moduleName   :: t d (f :: k -> *) (a :: k) -> [Char]
+  moduleName   :: t d (f :: k -> Type) (a :: k) -> [Char]
   -- | The package name of the module where the type is declared
   --
   -- @since 4.9.0.0
-  packageName :: t d (f :: k -> *) (a :: k) -> [Char]
+  packageName :: t d (f :: k -> Type) (a :: k) -> [Char]
   -- | Marks if the datatype is actually a newtype
   --
   -- @since 4.7.0.0
-  isNewtype    :: t d (f :: k -> *) (a :: k) -> Bool
+  isNewtype    :: t d (f :: k -> Type) (a :: k) -> Bool
   isNewtype _ = False
 
 -- | @since 4.9.0.0
@@ -1167,14 +1166,14 @@ instance (KnownSymbol n, KnownSymbol m, KnownSymbol p, SingI nt)
 -- | Class for datatypes that represent data constructors
 class Constructor c where
   -- | The name of the constructor
-  conName :: t c (f :: k -> *) (a :: k) -> [Char]
+  conName :: t c (f :: k -> Type) (a :: k) -> [Char]
 
   -- | The fixity of the constructor
-  conFixity :: t c (f :: k -> *) (a :: k) -> Fixity
+  conFixity :: t c (f :: k -> Type) (a :: k) -> Fixity
   conFixity _ = Prefix
 
   -- | Marks if this constructor is a record
-  conIsRecord :: t c (f :: k -> *) (a :: k) -> Bool
+  conIsRecord :: t c (f :: k -> Type) (a :: k) -> Bool
   conIsRecord _ = False
 
 -- | @since 4.9.0.0
@@ -1306,19 +1305,19 @@ data DecidedStrictness = DecidedLazy
 -- | Class for datatypes that represent records
 class Selector s where
   -- | The name of the selector
-  selName :: t s (f :: k -> *) (a :: k) -> [Char]
+  selName :: t s (f :: k -> Type) (a :: k) -> [Char]
   -- | The selector's unpackedness annotation (if any)
   --
   -- @since 4.9.0.0
-  selSourceUnpackedness :: t s (f :: k -> *) (a :: k) -> SourceUnpackedness
+  selSourceUnpackedness :: t s (f :: k -> Type) (a :: k) -> SourceUnpackedness
   -- | The selector's strictness annotation (if any)
   --
   -- @since 4.9.0.0
-  selSourceStrictness :: t s (f :: k -> *) (a :: k) -> SourceStrictness
+  selSourceStrictness :: t s (f :: k -> Type) (a :: k) -> SourceStrictness
   -- | The strictness that the compiler inferred for the selector
   --
   -- @since 4.9.0.0
-  selDecidedStrictness :: t s (f :: k -> *) (a :: k) -> DecidedStrictness
+  selDecidedStrictness :: t s (f :: k -> Type) (a :: k) -> DecidedStrictness
 
 -- | @since 4.9.0.0
 instance (SingI mn, SingI su, SingI ss, SingI ds)
@@ -1334,12 +1333,12 @@ instance (SingI mn, SingI su, SingI ss, SingI ds)
 -- A 'Generic' instance must satisfy the following laws:
 --
 -- @
--- 'from' . 'to' ≡ 'id'
--- 'to' . 'from' ≡ 'id'
+-- 'from' . 'to' ≡ 'Prelude.id'
+-- 'to' . 'from' ≡ 'Prelude.id'
 -- @
 class Generic a where
   -- | Generic representation type
-  type Rep a :: * -> *
+  type Rep a :: Type -> Type
   -- | Convert from the datatype to its representation
   from  :: a -> (Rep a) x
   -- | Convert from the representation to the datatype
@@ -1353,12 +1352,12 @@ class Generic a where
 -- A 'Generic1' instance must satisfy the following laws:
 --
 -- @
--- 'from1' . 'to1' ≡ 'id'
--- 'to1' . 'from1' ≡ 'id'
+-- 'from1' . 'to1' ≡ 'Prelude.id'
+-- 'to1' . 'from1' ≡ 'Prelude.id'
 -- @
-class Generic1 (f :: k -> *) where
+class Generic1 (f :: k -> Type) where
   -- | Generic representation type
-  type Rep1 f :: k -> *
+  type Rep1 f :: k -> Type
   -- | Convert from the datatype to its representation
   from1  :: f a -> (Rep1 f) a
   -- | Convert from the representation to the datatype
@@ -1435,6 +1434,9 @@ deriving instance Generic ((,,,,,) a b c d e f)
 -- | @since 4.6.0.0
 deriving instance Generic ((,,,,,,) a b c d e f g)
 
+-- | @since 4.12.0.0
+deriving instance Generic (Down a)
+
 
 -- | @since 4.6.0.0
 deriving instance Generic1 []
@@ -1469,6 +1471,9 @@ deriving instance Generic1 ((,,,,,) a b c d e)
 -- | @since 4.6.0.0
 deriving instance Generic1 ((,,,,,,) a b c d e f)
 
+-- | @since 4.12.0.0
+deriving instance Generic1 Down
+
 --------------------------------------------------------------------------------
 -- Copied from the singletons package
 --------------------------------------------------------------------------------
@@ -1477,8 +1482,6 @@ deriving instance Generic1 ((,,,,,,) a b c d e f)
 data family Sing (a :: k)
 
 -- | A 'SingI' constraint is essentially an implicitly-passed singleton.
--- If you need to satisfy this constraint with an explicit singleton, please
--- see 'withSingI'.
 class SingI (a :: k) where
   -- | Produce the singleton explicitly. You will likely need the @ScopedTypeVariables@
   -- extension to use this method the way you want.
@@ -1490,7 +1493,7 @@ class SingI (a :: k) where
 class SingKind k where
   -- | Get a base type from a proxy for the promoted kind. For example,
   -- @DemoteRep Bool@ will be the type @Bool@.
-  type DemoteRep k :: *
+  type DemoteRep k :: Type
 
   -- | Convert a singleton to its unrefined version.
   fromSing :: Sing (a :: k) -> DemoteRep k

@@ -1,6 +1,6 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE NoImplicitPrelude, MagicHash, ImplicitParams #-}
-{-# LANGUAGE RankNTypes, TypeInType #-}
+{-# LANGUAGE RankNTypes, PolyKinds, DataKinds #-}
 {-# OPTIONS_HADDOCK hide #-}
 
 -----------------------------------------------------------------------------
@@ -27,9 +27,11 @@ import GHC.CString ()
 import GHC.Types (Char, RuntimeRep)
 import GHC.Stack.Types
 import GHC.Prim
-import GHC.Integer ()   -- Make sure Integer is compiled first
-                        -- because GHC depends on it in a wired-in way
-                        -- so the build system doesn't see the dependency
+import GHC.Integer ()   -- Make sure Integer and Natural are compiled first
+import GHC.Natural ()   -- because GHC depends on it in a wired-in way
+                        -- so the build system doesn't see the dependency.
+                        -- See Note [Depend on GHC.Integer] and
+                        -- Note [Depend on GHC.Natural] in GHC.Base.
 import {-# SOURCE #-} GHC.Exception
   ( errorCallWithCallStackException
   , errorCallException )

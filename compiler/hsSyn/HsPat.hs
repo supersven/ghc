@@ -31,11 +31,10 @@ module HsPat (
 
         looksLazyPatBind,
         isBangedLPat,
-        hsPatNeedsParens,
-        isCompoundPat, parenthesizeCompoundPat,
+        patNeedsParens, parenthesizePat,
         isIrrefutableHsPat,
 
-        collectEvVarsPats,
+        collectEvVarsPat, collectEvVarsPats,
 
         pprParendLPat, pprConArgs
     ) where
@@ -167,12 +166,7 @@ data Pat p
     --            'ApiAnnotation.AnnClose' @'#)'@
 
     -- For details on above see note [Api annotations] in ApiAnnotation
-  | PArrPat     (XPArrPat p)   -- After typechecking,  the type of the elements
-                [LPat p]       -- Syntactic parallel array
-    -- ^ - 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnOpen' @'[:'@,
-    --                                    'ApiAnnotation.AnnClose' @':]'@
 
-    -- For details on above see note [Api annotations] in ApiAnnotation
         ------------ Constructor patterns ---------------
   | ConPatIn    (Located (IdP p))
                 (HsConPatDetails p)
@@ -256,11 +250,11 @@ data Pat p
   -- | - 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnDcolon'
 
   -- For details on above see note [Api annotations] in ApiAnnotation
-  | SigPat          (XSigPat p)          -- Before typechecker
-                                         --  Signature can bind both
-                                         --  kind and type vars
-                                         -- After typechecker: Type
+  | SigPat          (XSigPat p)             -- After typechecker: Type
                     (LPat p)                -- Pattern with a type signature
+                    (LHsSigWcType (NoGhcTc p)) --  Signature can bind both
+                                               --  kind and type vars
+
     -- ^ Pattern with a type signature
 
         ------------ Pattern coercions (translation only) ---------------
@@ -310,10 +304,6 @@ type instance XSumPat GhcPs = NoExt
 type instance XSumPat GhcRn = NoExt
 type instance XSumPat GhcTc = [Type]
 
-type instance XPArrPat GhcPs = NoExt
-type instance XPArrPat GhcRn = NoExt
-type instance XPArrPat GhcTc = Type
-
 type instance XViewPat GhcPs = NoExt
 type instance XViewPat GhcRn = NoExt
 type instance XViewPat GhcTc = Type
@@ -329,8 +319,8 @@ type instance XNPlusKPat GhcPs = NoExt
 type instance XNPlusKPat GhcRn = NoExt
 type instance XNPlusKPat GhcTc = Type
 
-type instance XSigPat GhcPs = (LHsSigWcType GhcPs)
-type instance XSigPat GhcRn = (LHsSigWcType GhcRn)
+type instance XSigPat GhcPs = NoExt
+type instance XSigPat GhcRn = NoExt
 type instance XSigPat GhcTc = Type
 
 type instance XCoPat  (GhcPass _) = NoExt
@@ -454,14 +444,14 @@ data HsRecField' id arg = HsRecField {
 --
 -- See also Note [Disambiguating record fields] in TcExpr.
 
-hsRecFields :: HsRecFields p arg -> [XFieldOcc p]
+hsRecFields :: HsRecFields p arg -> [XCFieldOcc p]
 hsRecFields rbinds = map (unLoc . hsRecFieldSel . unLoc) (rec_flds rbinds)
 
 -- Probably won't typecheck at once, things have changed :/
 hsRecFieldsArgs :: HsRecFields p arg -> [arg]
 hsRecFieldsArgs rbinds = map (hsRecFieldArg . unLoc) (rec_flds rbinds)
 
-hsRecFieldSel :: HsRecField pass arg -> Located (XFieldOcc pass)
+hsRecFieldSel :: HsRecField pass arg -> Located (XCFieldOcc pass)
 hsRecFieldSel = fmap extFieldOcc . hsRecFieldLbl
 
 hsRecFieldId :: HsRecField GhcTc arg -> Located Id
@@ -497,18 +487,20 @@ pprPatBndr var                  -- Print with type info if -dppr-debug is on
     else
         pprPrefixOcc var
 
-pprParendLPat :: (OutputableBndrId (GhcPass p)) => LPat (GhcPass p) -> SDoc
-pprParendLPat (L _ p) = pprParendPat p
+pprParendLPat :: (OutputableBndrId (GhcPass p))
+              => PprPrec -> LPat (GhcPass p) -> SDoc
+pprParendLPat p (L _ pat) = pprParendPat p pat
 
-pprParendPat :: (OutputableBndrId (GhcPass p)) => Pat (GhcPass p) -> SDoc
-pprParendPat p = sdocWithDynFlags $ \ dflags ->
-                 if need_parens dflags p
-                 then parens (pprPat p)
-                 else  pprPat p
+pprParendPat :: (OutputableBndrId (GhcPass p))
+             => PprPrec -> Pat (GhcPass p) -> SDoc
+pprParendPat p pat = sdocWithDynFlags $ \ dflags ->
+                     if need_parens dflags pat
+                     then parens (pprPat pat)
+                     else  pprPat pat
   where
-    need_parens dflags p
-      | CoPat {} <- p = gopt Opt_PrintTypecheckerElaboration dflags
-      | otherwise     = hsPatNeedsParens p
+    need_parens dflags pat
+      | CoPat {} <- pat = gopt Opt_PrintTypecheckerElaboration dflags
+      | otherwise       = patNeedsParens p pat
       -- For a CoPat we need parens if we are going to show it, which
       -- we do if -fprint-typechecker-elaboration is on (c.f. pprHsWrapper)
       -- But otherwise the CoPat is discarded, so it
@@ -517,10 +509,10 @@ pprParendPat p = sdocWithDynFlags $ \ dflags ->
 pprPat :: (OutputableBndrId (GhcPass p)) => Pat (GhcPass p) -> SDoc
 pprPat (VarPat _ (L _ var))     = pprPatBndr var
 pprPat (WildPat _)              = char '_'
-pprPat (LazyPat _ pat)          = char '~' <> pprParendLPat pat
-pprPat (BangPat _ pat)          = char '!' <> pprParendLPat pat
+pprPat (LazyPat _ pat)          = char '~' <> pprParendLPat appPrec pat
+pprPat (BangPat _ pat)          = char '!' <> pprParendLPat appPrec pat
 pprPat (AsPat _ name pat)       = hcat [pprPrefixOcc (unLoc name), char '@',
-                                        pprParendLPat pat]
+                                        pprParendLPat appPrec pat]
 pprPat (ViewPat _ expr pat)     = hcat [pprLExpr expr, text " -> ", ppr pat]
 pprPat (ParPat _ pat)           = parens (ppr pat)
 pprPat (LitPat _ s)             = ppr s
@@ -528,13 +520,12 @@ pprPat (NPat _ l Nothing  _)    = ppr l
 pprPat (NPat _ l (Just _) _)    = char '-' <> ppr l
 pprPat (NPlusKPat _ n k _ _ _)  = hcat [ppr n, char '+', ppr k]
 pprPat (SplicePat _ splice)     = pprSplice splice
-pprPat (CoPat _ co pat _)       = pprHsWrapper co (\parens
-                                                   -> if parens
-                                                        then pprParendPat pat
-                                                        else pprPat pat)
-pprPat (SigPat ty pat)          = ppr pat <+> dcolon <+> ppr ty
+pprPat (CoPat _ co pat _)       = pprHsWrapper co $ \parens
+                                            -> if parens
+                                                 then pprParendPat appPrec pat
+                                                 else pprPat pat
+pprPat (SigPat _ pat ty)        = ppr pat <+> dcolon <+> ppr ty
 pprPat (ListPat _ pats)         = brackets (interpp'SP pats)
-pprPat (PArrPat _ pats)         = paBrackets (interpp'SP pats)
 pprPat (TuplePat _ pats bx)     = tupleParens (boxityTupleSort bx)
                                               (pprWithCommas ppr pats)
 pprPat (SumPat _ pat alt arity) = sumParens (pprAlternative ppr pat alt arity)
@@ -561,8 +552,9 @@ pprUserCon c details          = pprPrefixOcc c <+> pprConArgs details
 
 pprConArgs :: (OutputableBndrId (GhcPass p))
            => HsConPatDetails (GhcPass p) -> SDoc
-pprConArgs (PrefixCon pats) = sep (map pprParendLPat pats)
-pprConArgs (InfixCon p1 p2) = sep [pprParendLPat p1, pprParendLPat p2]
+pprConArgs (PrefixCon pats) = sep (map (pprParendLPat appPrec) pats)
+pprConArgs (InfixCon p1 p2) = sep [ pprParendLPat appPrec p1
+                                  , pprParendLPat appPrec p2 ]
 pprConArgs (RecCon rpats)   = ppr rpats
 
 instance (Outputable arg)
@@ -687,12 +679,11 @@ isIrrefutableHsPat pat
     go1 (ParPat _ pat)      = go pat
     go1 (AsPat _ _ pat)     = go pat
     go1 (ViewPat _ _ pat)   = go pat
-    go1 (SigPat _ pat)      = go pat
+    go1 (SigPat _ pat _)    = go pat
     go1 (TuplePat _ pats _) = all go pats
     go1 (SumPat {})         = False
                     -- See Note [Unboxed sum patterns aren't irrefutable]
     go1 (ListPat {})        = False
-    go1 (PArrPat {})        = False     -- ?
 
     go1 (ConPatIn {})       = False     -- Conservative
     go1 (ConPatOut{ pat_con = L _ (RealDataCon con), pat_args = details })
@@ -735,86 +726,46 @@ case in foo to be unreachable, as GHC would mistakenly believe that Nothing'
 is the only thing that could possibly be matched!
 -}
 
--- | Returns 'True' if a pattern must be parenthesized in order to parse
--- (e.g., the @(x :: Int)@ in @f (x :: Int) = x@).
-hsPatNeedsParens :: Pat a -> Bool
-hsPatNeedsParens (NPlusKPat {})      = True
-hsPatNeedsParens (SplicePat {})      = False
-hsPatNeedsParens (ConPatIn _ ds)     = conPatNeedsParens ds
-hsPatNeedsParens p@(ConPatOut {})    = conPatNeedsParens (pat_args p)
-hsPatNeedsParens (SigPat {})         = True
-hsPatNeedsParens (ViewPat {})        = True
-hsPatNeedsParens (CoPat _ _ p _)     = hsPatNeedsParens p
-hsPatNeedsParens (WildPat {})        = False
-hsPatNeedsParens (VarPat {})         = False
-hsPatNeedsParens (LazyPat {})        = False
-hsPatNeedsParens (BangPat {})        = False
-hsPatNeedsParens (ParPat {})         = False
-hsPatNeedsParens (AsPat {})          = False
-hsPatNeedsParens (TuplePat {})       = False
-hsPatNeedsParens (SumPat {})         = False
-hsPatNeedsParens (ListPat {})        = False
-hsPatNeedsParens (PArrPat {})        = False
-hsPatNeedsParens (LitPat {})         = False
-hsPatNeedsParens (NPat {})           = False
-hsPatNeedsParens (XPat {})           = True -- conservative default
+-- | @'patNeedsParens' p pat@ returns 'True' if the pattern @pat@ needs
+-- parentheses under precedence @p@.
+patNeedsParens :: PprPrec -> Pat p -> Bool
+patNeedsParens p = go
+  where
+    go (NPlusKPat {})         = p > opPrec
+    go (SplicePat {})         = False
+    go (ConPatIn _ ds)        = conPatNeedsParens p ds
+    go cp@(ConPatOut {})      = conPatNeedsParens p (pat_args cp)
+    go (SigPat {})            = p >= sigPrec
+    go (ViewPat {})           = True
+    go (CoPat _ _ p _)        = go p
+    go (WildPat {})           = False
+    go (VarPat {})            = False
+    go (LazyPat {})           = False
+    go (BangPat {})           = False
+    go (ParPat {})            = False
+    go (AsPat {})             = False
+    go (TuplePat {})          = False
+    go (SumPat {})            = False
+    go (ListPat {})           = False
+    go (LitPat _ l)           = hsLitNeedsParens p l
+    go (NPat _ (L _ ol) _ _)  = hsOverLitNeedsParens p ol
+    go (XPat {})              = True -- conservative default
 
--- | Returns 'True' if a constructor pattern must be parenthesized in order
--- to parse.
-conPatNeedsParens :: HsConDetails a b -> Bool
-conPatNeedsParens (PrefixCon {}) = False
-conPatNeedsParens (InfixCon {})  = True
-conPatNeedsParens (RecCon {})    = False
+-- | @'conPatNeedsParens' p cp@ returns 'True' if the constructor patterns @cp@
+-- needs parentheses under precedence @p@.
+conPatNeedsParens :: PprPrec -> HsConDetails a b -> Bool
+conPatNeedsParens p = go
+  where
+    go (PrefixCon args) = p >= appPrec && not (null args)
+    go (InfixCon {})    = p >= opPrec
+    go (RecCon {})      = False
 
--- | Returns 'True' for compound patterns that need parentheses when used in
--- an argument position.
---
--- Note that this is different from 'hsPatNeedsParens', which only says if
--- a pattern needs to be parenthesized to parse in /any/ position, whereas
--- 'isCompountPat' says if a pattern needs to be parenthesized in an /argument/
--- position. In other words, @'hsPatNeedsParens' x@ implies
--- @'isCompoundPat' x@, but not necessarily the other way around.
-isCompoundPat :: Pat a -> Bool
-isCompoundPat (NPlusKPat {})       = True
-isCompoundPat (SplicePat {})       = False
-isCompoundPat (ConPatIn _ ds)      = isCompoundConPat ds
-isCompoundPat p@(ConPatOut {})     = isCompoundConPat (pat_args p)
-isCompoundPat (SigPat {})          = True
-isCompoundPat (ViewPat {})         = True
-isCompoundPat (CoPat _ _ p _)      = isCompoundPat p
-isCompoundPat (WildPat {})         = False
-isCompoundPat (VarPat {})          = False
-isCompoundPat (LazyPat {})         = False
-isCompoundPat (BangPat {})         = False
-isCompoundPat (ParPat {})          = False
-isCompoundPat (AsPat {})           = False
-isCompoundPat (TuplePat {})        = False
-isCompoundPat (SumPat {})          = False
-isCompoundPat (ListPat {})         = False
-isCompoundPat (PArrPat {})         = False
-isCompoundPat (LitPat _ p)         = isCompoundHsLit p
-isCompoundPat (NPat _ (L _ p) _ _) = isCompoundHsOverLit p
-isCompoundPat (XPat {})            = False -- Assumption
-
--- | Returns 'True' for compound constructor patterns that need parentheses
--- when used in an argument position.
---
--- Note that this is different from 'conPatNeedsParens', which only says if
--- a constructor pattern needs to be parenthesized to parse in /any/ position,
--- whereas 'isCompountConPat' says if a pattern needs to be parenthesized in an
--- /argument/ position. In other words, @'conPatNeedsParens' x@ implies
--- @'isCompoundConPat' x@, but not necessarily the other way around.
-isCompoundConPat :: HsConDetails a b -> Bool
-isCompoundConPat (PrefixCon args) = not (null args)
-isCompoundConPat (InfixCon {})    = True
-isCompoundConPat (RecCon {})      = False
-
--- | @'parenthesizeCompoundPat' p@ checks if @'isCompoundPat' p@ is true, and
--- if so, surrounds @p@ with a 'ParPat'. Otherwise, it simply returns @p@.
-parenthesizeCompoundPat :: LPat (GhcPass p) -> LPat (GhcPass p)
-parenthesizeCompoundPat lp@(L loc p)
-  | isCompoundPat p = L loc (ParPat NoExt lp)
-  | otherwise       = lp
+-- | @'parenthesizePat' p pat@ checks if @'patNeedsParens' p pat@ is true, and
+-- if so, surrounds @pat@ with a 'ParPat'. Otherwise, it simply returns @pat@.
+parenthesizePat :: PprPrec -> LPat (GhcPass p) -> LPat (GhcPass p)
+parenthesizePat p lpat@(L loc pat)
+  | patNeedsParens p pat = L loc (ParPat NoExt lpat)
+  | otherwise            = lpat
 
 {-
 % Collect all EvVars from all constructor patterns
@@ -837,13 +788,12 @@ collectEvVarsPat pat =
     ListPat _ ps     -> unionManyBags $ map collectEvVarsLPat ps
     TuplePat _ ps _  -> unionManyBags $ map collectEvVarsLPat ps
     SumPat _ p _ _   -> collectEvVarsLPat p
-    PArrPat _ ps     -> unionManyBags $ map collectEvVarsLPat ps
     ConPatOut {pat_dicts = dicts, pat_args  = args}
                      -> unionBags (listToBag dicts)
                                    $ unionManyBags
                                    $ map collectEvVarsLPat
                                    $ hsConPatArgs args
-    SigPat  _ p      -> collectEvVarsLPat p
+    SigPat  _ p _    -> collectEvVarsLPat p
     CoPat _ _ p _    -> collectEvVarsPat  p
     ConPatIn _  _    -> panic "foldMapPatBag: ConPatIn"
     _other_pat       -> emptyBag

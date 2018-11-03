@@ -130,7 +130,7 @@ possible to do this directly in the source file using the
 ``OPTIONS_GHC`` is a *file-header pragma* (see :ref:`options-pragma`).
 
 Only *dynamic* flags can be used in an ``OPTIONS_GHC`` pragma (see
-:ref:`static-dynamic-flags`).
+:ref:`mode-dynamic-flags`).
 
 Note that your command shell does not get to the source file options,
 they are just included literally in the array of command-line arguments
@@ -153,36 +153,28 @@ Setting options in GHCi
 Options may also be modified from within GHCi, using the :ghci-cmd:`:set`
 command.
 
-.. _static-dynamic-flags:
+.. _mode-dynamic-flags:
 
-Static, Dynamic, and Mode options
----------------------------------
+Dynamic and Mode options
+------------------------
 
 .. index::
-   single: static; options
    single: dynamic; options
    single: mode; options
 
-Each of GHC's command line options is classified as static, dynamic or
-mode:
+Each of GHC's command line options is classified as dynamic or mode:
 
-    For example, :ghc-flag:`--make` or :ghc-flag:`-E`. There may only be a single mode
-    flag on the command line. The available modes are listed in
-    :ref:`modes`.
+    Mode: A mode may be used on the command line only.
+    You can pass only one mode flag.
+    For example, :ghc-flag:`--make` or :ghc-flag:`-E`.
+    The available modes are listed in :ref:`modes`.
 
-    Most non-mode flags fall into this category. A dynamic flag may be
-    used on the command line, in a ``OPTIONS_GHC`` pragma in a source
+    Dynamic: A dynamic flag may be used on the command line,
+    in a ``OPTIONS_GHC`` pragma in a source
     file, or set using :ghci-cmd:`:set` in GHCi.
-
-    A few flags are "static", which means they can only be used on the
-    command-line, and remain in force over the entire GHC/GHCi run.
 
 The flag reference tables (:ref:`flag-reference`) lists the status of
 each flag.
-
-There are a few flags that are static except that they can also be used
-with GHCi's :ghci-cmd:`:set` command; these are listed as “static/\ ``:set``\ ”
-in the table.
 
 .. _file-suffixes:
 
@@ -772,10 +764,13 @@ messages and in GHCi:
 
            ghci> :i Data.Type.Equality.sym
            Data.Type.Equality.sym ::
-             forall (k :: BOX) (a :: k) (b :: k).
+             forall k (a :: k) (b :: k).
              (a Data.Type.Equality.:~: b) -> b Data.Type.Equality.:~: a
                    -- Defined in Data.Type.Equality
 
+    This flag also enables the printing of *inferred* type variables
+    inside braces. See :ref:`inferred-vs-specified`.
+		   
 .. ghc-flag:: -fprint-explicit-kinds
     :shortdesc: Print explicit kind foralls and kind arguments in types.
         See also :ghc-flag:`-XKindSignatures`
@@ -789,13 +784,16 @@ messages and in GHCi:
 
     .. code-block:: none
 
-        ghci> :set -XPolyKinds
-        ghci> data T a = MkT
-        ghci> :t MkT
-        MkT :: forall (k :: BOX) (a :: k). T a
-        ghci> :set -fprint-explicit-foralls
-        ghci> :t MkT
-        MkT :: forall (k :: BOX) (a :: k). T k a
+           ghci> :set -XPolyKinds
+           ghci> data T a = MkT
+           ghci> :t MkT
+           MkT :: forall (k :: Type) (a :: k). T a
+           ghci> :set -fprint-explicit-kinds
+           ghci> :t MkT
+           MkT :: forall (k :: Type) (a :: k). T k a
+           ghci> :set -XNoPolyKinds
+           ghci> :t MkT
+           MkT :: T * a
 
 .. ghc-flag:: -fprint-explicit-runtime-reps
     :shortdesc: Print ``RuntimeRep`` variables in types which are
@@ -806,7 +804,7 @@ messages and in GHCi:
 
     When :ghc-flag:`-fprint-explicit-runtime-reps` is enabled, GHC prints
     ``RuntimeRep`` type variables for levity-polymorphic types.
-    Otherwise GHC will default these to ``PtrRepLifted``. For example,
+    Otherwise GHC will default these to ``LiftedRep``. For example,
 
     .. code-block:: none
 
@@ -1005,6 +1003,16 @@ messages and in GHCi:
     Note that line numbers start counting at one, but column numbers
     start at zero. This choice was made to follow existing convention
     (i.e. this is how Emacs does it).
+
+.. ghc-flag:: -freverse-errors
+    :shortdesc: Output errors in reverse order
+    :type: dynamic
+    :reverse: -fno-reverse-errors
+    :category: verbosity
+
+    Causes GHC to output errors in reverse line-number order, so that
+    the errors and warnings that originate later in the file are
+    displayed first.
 
 .. ghc-flag:: -H ⟨size⟩
     :shortdesc: Set the minimum size of the heap to ⟨size⟩

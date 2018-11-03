@@ -150,9 +150,8 @@ See #9562.
 -- It is defined here to avoid a dependency from FamInstEnv on the monad
 -- code.
 
-newFamInst :: FamFlavor -> CoAxiom Unbranched -> TcRnIf gbl lcl FamInst
+newFamInst :: FamFlavor -> CoAxiom Unbranched -> TcM FamInst
 -- Freshen the type variables of the FamInst branches
--- Called from the vectoriser monad too, hence the rather general type
 newFamInst flavor axiom@(CoAxiom { co_ax_tc = fam_tc })
   = ASSERT2( tyCoVarsOfTypes lhs `subVarSet` tcv_set, text "lhs" <+> pp_ax )
     ASSERT2( tyCoVarsOfType  rhs `subVarSet` tcv_set, text "rhs" <+> pp_ax )
@@ -163,13 +162,22 @@ newFamInst flavor axiom@(CoAxiom { co_ax_tc = fam_tc })
        ; let lhs'     = substTys subst lhs
              rhs'     = substTy  subst rhs
              tcvs'    = tvs' ++ cvs'
-       ; when (gopt Opt_DoCoreLinting dflags) $
+       ; ifErrsM (return ()) $ -- Don't lint when there are errors, because
+                               -- errors might mean TcTyCons.
+                               -- See Note [Recover from validity error] in TcTyClsDecls
+         when (gopt Opt_DoCoreLinting dflags) $
            -- Check that the types involved in this instance are well formed.
            -- Do /not/ expand type synonyms, for the reasons discussed in
            -- Note [Linting type synonym applications].
            case lintTypes dflags tcvs' (rhs':lhs') of
              Nothing       -> pure ()
-             Just fail_msg -> pprPanic "Core Lint error" fail_msg
+             Just fail_msg -> pprPanic "Core Lint error" (vcat [ fail_msg
+                                                               , ppr fam_tc
+                                                               , ppr subst
+                                                               , ppr tvs'
+                                                               , ppr cvs'
+                                                               , ppr lhs'
+                                                               , ppr rhs' ])
        ; return (FamInst { fi_fam      = tyConName fam_tc
                          , fi_flavor   = flavor
                          , fi_tcs      = roughMatchTcs lhs
@@ -444,7 +452,7 @@ checkFamInstConsistency directlyImpMods
            -- as quickly as possible, so that we aren't typechecking
            -- values with inconsistent axioms in scope.
            --
-           -- See also Note [Tying the knot] and Note [Type-checking inside the knot]
+           -- See also Note [Tying the knot]
            -- for why we are doing this at all.
            ; let check_now = famInstEnvElts env1
            ; mapM_ (checkForConflicts (emptyFamInstEnv, env2))           check_now
@@ -764,11 +772,15 @@ unusedInjTvsInRHS :: TyCon -> [Bool] -> [Type] -> Type -> Pair TyVarSet
 unusedInjTvsInRHS tycon injList lhs rhs =
   (`minusVarSet` injRhsVars) <$> injLHSVars
     where
+      inj_pairs :: [(Type, ArgFlag)]
+      -- All the injective arguments, paired with their visiblity
+      inj_pairs = ASSERT2( injList `equalLength` lhs
+                         , ppr tycon $$ ppr injList $$ ppr lhs )
+                  filterByList injList (lhs `zip` tyConArgFlags tycon lhs)
+
       -- set of type and kind variables in which type family is injective
-      (invis_pairs, vis_pairs)
-        = partitionInvisibles tycon snd (zipEqual "unusedInjTvsInRHS" injList lhs)
-      invis_lhs = uncurry filterByList $ unzip invis_pairs
-      vis_lhs   = uncurry filterByList $ unzip vis_pairs
+      invis_lhs, vis_lhs :: [Type]
+      (invis_lhs, vis_lhs) = partitionInvisibles inj_pairs
 
       invis_vars = tyCoVarsOfTypes invis_lhs
       Pair invis_vars' vis_vars = splitVisVarsOfTypes vis_lhs
@@ -789,6 +801,9 @@ injTyVarsOfType :: TcTauType -> TcTyVarSet
 -- E.g.   Suppose F is injective in its second arg, but not its first
 --        then injVarOfType (Either a (F [b] (a,c))) = {a,c}
 --        Determining the overall type determines a,c but not b.
+injTyVarsOfType ty
+  | Just ty' <- coreView ty -- #12430
+  = injTyVarsOfType ty'
 injTyVarsOfType (TyVarTy v)
   = unitVarSet v `unionVarSet` injTyVarsOfType (tyVarKind v)
 injTyVarsOfType (TyConApp tc tys)
@@ -887,7 +902,7 @@ unusedInjectiveVarsErr (Pair invis_vars vis_vars) errorBuilder tyfamEqn
       has_kinds = not $ isEmptyVarSet invis_vars
 
       doc = sep [ what <+> text "variable" <>
-                  pluralVarSet tvs <+> pprVarSet tvs (pprQuotedList . toposortTyVars)
+                  pluralVarSet tvs <+> pprVarSet tvs (pprQuotedList . scopedSort)
                 , text "cannot be inferred from the right-hand side." ]
       what = case (has_types, has_kinds) of
                (True, True)   -> text "Type and kind"

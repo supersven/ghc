@@ -175,6 +175,7 @@ void _assertFail(const char *filename, unsigned int linenum)
 #include "rts/storage/FunTypes.h"
 #include "rts/storage/InfoTables.h"
 #include "rts/storage/Closures.h"
+#include "rts/storage/Heap.h"
 #include "rts/storage/ClosureTypes.h"
 #include "rts/storage/TSO.h"
 #include "stg/MiscClosures.h" /* InfoTables, closures etc. defined in the RTS */
@@ -197,7 +198,8 @@ void _assertFail(const char *filename, unsigned int linenum)
 #include "rts/Linker.h"
 #include "rts/Ticky.h"
 #include "rts/Timer.h"
-#include "rts/Stable.h"
+#include "rts/StablePtr.h"
+#include "rts/StableName.h"
 #include "rts/TTY.h"
 #include "rts/Utils.h"
 #include "rts/PrimFloat.h"

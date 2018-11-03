@@ -19,14 +19,14 @@ import GhcPrelude
 import HsSyn
 import TcBinds
 import TcTyClsDecls
+import TcTyDecls ( addTyConsToGblEnv )
 import TcClassDcl( tcClassDecl2, tcATDefault,
                    HsSigFun, mkHsSigFun,
                    findMethodBind, instantiateMethod )
 import TcSigs
 import TcRnMonad
 import TcValidity
-import TcHsSyn    ( zonkTyBndrsX, emptyZonkEnv
-                  , zonkTcTypeToTypes, zonkTcTypeToType )
+import TcHsSyn
 import TcMType
 import TcType
 import BuildTyCl
@@ -41,7 +41,6 @@ import TcUnify
 import CoreSyn    ( Expr(..), mkApps, mkVarApps, mkLams )
 import MkCore     ( nO_METHOD_BINDING_ERROR_ID )
 import CoreUnfold ( mkInlineUnfoldingWithArity, mkDFunUnfolding )
-import Kind
 import Type
 import TcEvidence
 import TyCon
@@ -52,14 +51,13 @@ import Class
 import Var
 import VarEnv
 import VarSet
-import PrelNames  ( typeableClassName, genericClassNames
-                  , knownNatClassName, knownSymbolClassName )
 import Bag
 import BasicTypes
 import DynFlags
 import ErrUtils
 import FastString
 import Id
+import ListSetOps
 import MkId
 import Name
 import NameSet
@@ -415,13 +413,12 @@ addFamInsts :: [FamInst] -> TcM a -> TcM a
 --        (b) the type envt with stuff from data type decls
 addFamInsts fam_insts thing_inside
   = tcExtendLocalFamInstEnv fam_insts $
-    tcExtendGlobalEnv axioms $
-    tcExtendTyConEnv data_rep_tycons  $
+    tcExtendGlobalEnv axioms          $
     do { traceTc "addFamInsts" (pprFamInsts fam_insts)
-       ; tcg_env <- tcAddImplicits data_rep_tycons
-                    -- Does not add its axiom; that comes from
-                    -- adding the 'axioms' above
-       ; setGblEnv tcg_env thing_inside }
+       ; gbl_env <- addTyConsToGblEnv data_rep_tycons
+                    -- Does not add its axiom; that comes
+                    -- from adding the 'axioms' above
+       ; setGblEnv gbl_env thing_inside }
   where
     axioms = map (ACoAxiom . toBranchedAxiom . famInstAxiom) fam_insts
     data_rep_tycons = famInstsRepTyCons fam_insts
@@ -474,7 +471,10 @@ tcClsInstDecl (L loc (ClsInstDecl { cid_poly_ty = poly_ty, cid_binds = binds
                                   , cid_datafam_insts = adts }))
   = setSrcSpan loc                      $
     addErrCtxt (instDeclCtxt1 poly_ty)  $
-    do  { (tyvars, theta, clas, inst_tys) <- tcHsClsInstType InstDeclCtxt poly_ty
+    do  { (tyvars, theta, clas, inst_tys)
+             <- tcHsClsInstType (InstDeclCtxt False) poly_ty
+             -- NB: tcHsClsInstType does checkValidInstance
+
         ; let mini_env   = mkVarEnv (classTyVars clas `zip` inst_tys)
               mini_subst = mkTvSubst (mkInScopeSet (mkVarSet tyvars)) mini_env
               mb_info    = Just (clas, tyvars, mini_env)
@@ -515,59 +515,14 @@ tcClsInstDecl (L loc (ClsInstDecl { cid_poly_ty = poly_ty, cid_binds = binds
                                      , ib_extensions = []
                                      , ib_derived = False } }
 
-        ; doClsInstErrorChecks inst_info
+         -- In hs-boot files there should be no bindings
+        ; is_boot <- tcIsHsBootOrSig
+        ; let no_binds = isEmptyLHsBinds binds && null uprags
+        ; failIfTc (is_boot && not no_binds) badBootDeclErr
 
         ; return ( [inst_info], tyfam_insts0 ++ concat tyfam_insts1 ++ datafam_insts
                  , deriv_infos ) }
 tcClsInstDecl (L _ (XClsInstDecl _)) = panic "tcClsInstDecl"
-
-doClsInstErrorChecks :: InstInfo GhcRn -> TcM ()
-doClsInstErrorChecks inst_info
- = do { traceTc "doClsInstErrorChecks" (ppr ispec)
-      ; dflags <- getDynFlags
-      ; is_boot <- tcIsHsBootOrSig
-
-         -- In hs-boot files there should be no bindings
-      ; failIfTc (is_boot && not no_binds) badBootDeclErr
-
-         -- If not in an hs-boot file, abstract classes cannot have
-         -- instances declared
-      ; failIfTc (not is_boot && isAbstractClass clas) abstractClassInstErr
-
-         -- Handwritten instances of any rejected
-         -- class is always forbidden
-         -- #12837
-      ; failIfTc (clas_nm `elem` rejectedClassNames) clas_err
-
-         -- Check for hand-written Generic instances (disallowed in Safe Haskell)
-      ; when (clas_nm `elem` genericClassNames) $
-        do { failIfTc (safeLanguageOn dflags) gen_inst_err
-           ; when (safeInferOn dflags) (recordUnsafeInfer emptyBag) }
-  }
-  where
-    ispec    = iSpec inst_info
-    binds    = iBinds inst_info
-    no_binds = isEmptyLHsBinds (ib_binds binds) && null (ib_pragmas binds)
-    clas_nm  = is_cls_nm ispec
-    clas     = is_cls ispec
-
-    gen_inst_err = hang (text ("Generic instances can only be "
-                            ++ "derived in Safe Haskell.") $+$
-                         text "Replace the following instance:")
-                      2 (pprInstanceHdr ispec)
-
-    abstractClassInstErr =
-        text "Cannot define instance for abstract class" <+> quotes (ppr clas_nm)
-
-    -- Report an error or a warning for certain class instances.
-    -- If we are working on an .hs-boot file, we just report a warning,
-    -- and ignore the instance.  We do this, to give users a chance to fix
-    -- their code.
-    rejectedClassNames = [ typeableClassName
-                         , knownNatClassName
-                         , knownSymbolClassName ]
-    clas_err = text "Class" <+> quotes (ppr clas_nm)
-                    <+> text "does not support user-specified instances"
 
 {-
 ************************************************************************
@@ -632,10 +587,10 @@ tcDataFamInstDecl :: Maybe ClsInstInfo
                   -> LDataFamInstDecl GhcRn -> TcM (FamInst, Maybe DerivInfo)
   -- "newtype instance" and "data instance"
 tcDataFamInstDecl mb_clsinfo
-    (L loc decl@(DataFamInstDecl { dfid_eqn = HsIB { hsib_ext
-                                               = HsIBRn { hsib_vars = tv_names }
-                                 , hsib_body =
-      FamEqn { feqn_pats   = pats
+    (L loc decl@(DataFamInstDecl { dfid_eqn = HsIB { hsib_ext = tv_names
+                                                   , hsib_body =
+      FamEqn { feqn_bndrs  = mb_bndrs
+             , feqn_pats   = pats
              , feqn_tycon  = fam_tc_name
              , feqn_fixity = fixity
              , feqn_rhs    = HsDataDefn { dd_ND = new_or_data
@@ -654,16 +609,16 @@ tcDataFamInstDecl mb_clsinfo
 
          -- Kind check type patterns
        ; let mb_kind_env = thdOf3 <$> mb_clsinfo
-       ; tcFamTyPats fam_tc mb_clsinfo tv_names pats
+       ; tcFamTyPats fam_tc mb_clsinfo tv_names mb_bndrs pats
                      (kcDataDefn mb_kind_env decl) $
              \tvs pats res_kind ->
     do { stupid_theta <- solveEqualities $ tcHsContext ctxt
 
             -- Zonk the patterns etc into the Type world
-       ; (ze, tvs')    <- zonkTyBndrsX emptyZonkEnv tvs
-       ; pats'         <- zonkTcTypeToTypes ze pats
-       ; res_kind'     <- zonkTcTypeToType  ze res_kind
-       ; stupid_theta' <- zonkTcTypeToTypes ze stupid_theta
+       ; (ze, tvs')    <- zonkTyBndrs tvs
+       ; pats'         <- zonkTcTypesToTypesX ze pats
+       ; res_kind'     <- zonkTcTypeToTypeX   ze res_kind
+       ; stupid_theta' <- zonkTcTypesToTypesX ze stupid_theta
 
        ; gadt_syntax <- dataDeclChecks (tyConName fam_tc) new_or_data stupid_theta' cons
 
@@ -684,7 +639,7 @@ tcDataFamInstDecl mb_clsinfo
          -- Deal with any kind signature.
          -- See also Note [Arity of data families] in FamInstEnv
        ; (extra_tcbs, final_res_kind) <- tcDataKindSig full_tcbs res_kind'
-       ; checkTc (tcIsStarKind final_res_kind) (badKindSig True res_kind')
+       ; checkTc (tcIsLiftedTypeKind final_res_kind) (badKindSig True res_kind')
 
        ; let extra_pats  = map (mkTyVarTy . binderVar) extra_tcbs
              all_pats    = pats' `chkAppend` extra_pats
@@ -693,7 +648,7 @@ tcDataFamInstDecl mb_clsinfo
        ; (rep_tc, axiom) <- fixM $ \ ~(rec_rep_tc, _) ->
            do { let ty_binders = full_tcbs `chkAppend` extra_tcbs
               ; data_cons <- tcConDecls rec_rep_tc
-                                        (ty_binders, orig_res_ty) cons
+                                        ty_binders orig_res_ty cons
               ; tc_rhs <- case new_or_data of
                      DataType -> return (mkDataTyConRhs data_cons)
                      NewType  -> ASSERT( not (null data_cons) )
@@ -726,7 +681,7 @@ tcDataFamInstDecl mb_clsinfo
        ; checkValidFamPats mb_clsinfo fam_tc tvs' [] pats' extra_pats pp_hs_pats
 
          -- Result kind must be '*' (otherwise, we have too few patterns)
-       ; checkTc (tcIsStarKind final_res_kind) $
+       ; checkTc (tcIsLiftedTypeKind final_res_kind) $
          tooFewParmsErr (tyConArity fam_tc)
 
        ; checkValidTyCon rep_tc
@@ -756,7 +711,7 @@ tcDataFamInstDecl mb_clsinfo
       = go pats (tv : etad_tvs)
     go pats etad_tvs = (reverse pats, etad_tvs)
 
-    pp_hs_pats = pprFamInstLHS fam_tc_name pats fixity (unLoc ctxt) m_ksig
+    pp_hs_pats = pprFamInstLHS fam_tc_name mb_bndrs pats fixity (unLoc ctxt) m_ksig
 
 tcDataFamInstDecl _
     (L _ (DataFamInstDecl
@@ -856,15 +811,14 @@ tcInstDecl2 (InstInfo { iSpec = ispec, iBinds = ibinds })
                             , sc_binds   `unionBags` meth_binds
                             , sc_implics `unionBags` meth_implics ) }
 
-       ; env <- getLclEnv
+       ; imp <- newImplication
        ; emitImplication $
-         newImplication { ic_tclvl  = tclvl
-                        , ic_skols  = inst_tyvars
-                        , ic_given  = dfun_ev_vars
-                        , ic_wanted = mkImplicWC sc_meth_implics
-                        , ic_binds  = dfun_ev_binds_var
-                        , ic_env    = env
-                        , ic_info   = InstSkol }
+         imp { ic_tclvl  = tclvl
+             , ic_skols  = inst_tyvars
+             , ic_given  = dfun_ev_vars
+             , ic_wanted = mkImplicWC sc_meth_implics
+             , ic_binds  = dfun_ev_binds_var
+             , ic_info   = InstSkol }
 
        -- Create the result bindings
        ; self_dict <- newDict clas inst_tys
@@ -886,7 +840,7 @@ tcInstDecl2 (InstInfo { iSpec = ispec, iBinds = ibinds })
                        -- NB: We *can* have covars in inst_tys, in the case of
                        -- promoted GADT constructors.
 
-             con_app_args = foldl app_to_meth con_app_tys sc_meth_ids
+             con_app_args = foldl' app_to_meth con_app_tys sc_meth_ids
 
              app_to_meth :: HsExpr GhcTc -> Id -> HsExpr GhcTc
              app_to_meth fun meth_id = HsApp noExt (L loc fun)
@@ -1051,7 +1005,7 @@ tcSuperClasses dfun_id cls tyvars dfun_evs inst_tys dfun_ev_binds sc_theta
 
            ; sc_top_name  <- newName (mkSuperDictAuxOcc n (getOccName cls))
            ; sc_ev_id     <- newEvVar sc_pred
-           ; addTcEvBind ev_binds_var $ mkWantedEvBind sc_ev_id (EvExpr sc_ev_tm)
+           ; addTcEvBind ev_binds_var $ mkWantedEvBind sc_ev_id sc_ev_tm
            ; let sc_top_ty = mkInvForAllTys tyvars (mkLamTypes dfun_evs sc_pred)
                  sc_top_id = mkLocalId sc_top_name sc_top_ty
                  export = ABE { abe_ext  = noExt
@@ -1078,14 +1032,13 @@ checkInstConstraints thing_inside
                                     thing_inside
 
        ; ev_binds_var <- newTcEvBinds
-       ; env <- getLclEnv
-       ; let implic = newImplication { ic_tclvl  = tclvl
-                                     , ic_wanted = wanted
-                                     , ic_binds  = ev_binds_var
-                                     , ic_env    = env
-                                     , ic_info   = InstSkol }
+       ; implic <- newImplication
+       ; let implic' = implic { ic_tclvl  = tclvl
+                              , ic_wanted = wanted
+                              , ic_binds  = ev_binds_var
+                              , ic_info   = InstSkol }
 
-       ; return (implic, ev_binds_var, result) }
+       ; return (implic', ev_binds_var, result) }
 
 {-
 Note [Recursive superclasses]
@@ -1302,16 +1255,24 @@ tcMethods dfun_id clas tyvars dfun_ev_vars inst_tys
                                 , ib_derived    = is_derived })
       -- tcExtendTyVarEnv (not scopeTyVars) is OK because the TcLevel is pushed
       -- in checkInstConstraints
-  = tcExtendTyVarEnv2 (lexical_tvs `zip` tyvars) $
+  = tcExtendNameTyVarEnv (lexical_tvs `zip` tyvars) $
        -- The lexical_tvs scope over the 'where' part
     do { traceTc "tcInstMeth" (ppr sigs $$ ppr binds)
        ; checkMinimalDefinition
+       ; checkMethBindMembership
        ; (ids, binds, mb_implics) <- set_exts exts $
+                                     unset_warnings_deriving $
                                      mapAndUnzip3M tc_item op_items
        ; return (ids, listToBag binds, listToBag (catMaybes mb_implics)) }
   where
     set_exts :: [LangExt.Extension] -> TcM a -> TcM a
     set_exts es thing = foldr setXOptM thing es
+
+    -- See Note [Avoid -Winaccessible-code when deriving]
+    unset_warnings_deriving :: TcM a -> TcM a
+    unset_warnings_deriving
+      | is_derived = unsetWOptM Opt_WarnInaccessibleCode
+      | otherwise  = id
 
     hs_sig_fn = mkHsSigFun sigs
     inst_loc  = getSrcSpan dfun_id
@@ -1367,6 +1328,90 @@ tcMethods dfun_id clas tyvars dfun_ev_vars inst_tys
         warnUnsatisfiedMinimalDefinition
 
     methodExists meth = isJust (findMethodBind meth binds prag_fn)
+
+    ----------------------
+    -- Check if any method bindings do not correspond to the class.
+    -- See Note [Mismatched class methods and associated type families].
+    checkMethBindMembership
+      = let bind_nms         = map unLoc $ collectMethodBinders binds
+            cls_meth_nms     = map (idName . fst) op_items
+            mismatched_meths = bind_nms `minusList` cls_meth_nms
+        in forM_ mismatched_meths $ \mismatched_meth ->
+             addErrTc $ hsep
+             [ text "Class", quotes (ppr (className clas))
+             , text "does not have a method", quotes (ppr mismatched_meth)]
+
+{-
+Note [Mismatched class methods and associated type families]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+It's entirely possible for someone to put methods or associated type family
+instances inside of a class in which it doesn't belong. For instance, we'd
+want to fail if someone wrote this:
+
+  instance Eq () where
+    type Rep () = Maybe
+    compare = undefined
+
+Since neither the type family `Rep` nor the method `compare` belong to the
+class `Eq`. Normally, this is caught in the renamer when resolving RdrNames,
+since that would discover that the parent class `Eq` is incorrect.
+
+However, there is a scenario in which the renamer could fail to catch this:
+if the instance was generated through Template Haskell, as in #12387. In that
+case, Template Haskell will provide fully resolved names (e.g.,
+`GHC.Classes.compare`), so the renamer won't notice the sleight-of-hand going
+on. For this reason, we also put an extra validity check for this in the
+typechecker as a last resort.
+
+Note [Avoid -Winaccessible-code when deriving]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-Winaccessible-code can be particularly noisy when deriving instances for
+GADTs. Consider the following example (adapted from #8128):
+
+  data T a where
+    MkT1 :: Int -> T Int
+    MkT2 :: T Bool
+    MkT3 :: T Bool
+  deriving instance Eq (T a)
+  deriving instance Ord (T a)
+
+In the derived Ord instance, GHC will generate the following code:
+
+  instance Ord (T a) where
+    compare x y
+      = case x of
+          MkT2
+            -> case y of
+                 MkT1 {} -> GT
+                 MkT2    -> EQ
+                 _       -> LT
+          ...
+
+However, that MkT1 is unreachable, since the type indices for MkT1 and MkT2
+differ, so if -Winaccessible-code is enabled, then deriving this instance will
+result in unwelcome warnings.
+
+One conceivable approach to fixing this issue would be to change `deriving Ord`
+such that it becomes smarter about not generating unreachable cases. This,
+however, would be a highly nontrivial refactor, as we'd have to propagate
+through typing information everywhere in the algorithm that generates Ord
+instances in order to determine which cases were unreachable. This seems like
+a lot of work for minimal gain, so we have opted not to go for this approach.
+
+Instead, we take the much simpler approach of always disabling
+-Winaccessible-code for derived code. To accomplish this, we do the following:
+
+1. In tcMethods (which typechecks method bindings), disable
+   -Winaccessible-code.
+2. When creating Implications during typechecking, record the Env
+   (through ic_env) at the time of creation. Since the Env also stores
+   DynFlags, this will remember that -Winaccessible-code was disabled over
+   the scope of that implication.
+3. After typechecking comes error reporting, where GHC must decide how to
+   report inaccessible code to the user, on an Implication-by-Implication
+   basis. If an Implication's DynFlags indicate that -Winaccessible-code was
+   disabled, then don't bother reporting it. That's it!
+-}
 
 ------------------------
 tcMethodBody :: Class -> [TcTyVar] -> [EvVar] -> [TcType]
@@ -1611,7 +1656,7 @@ mkDefMethBind clas inst_tys sel_id dm_name
               fn   = noLoc (idName sel_id)
               visible_inst_tys = [ ty | (tcb, ty) <- tyConBinders (classTyCon clas) `zip` inst_tys
                                       , tyConBinderArgFlag tcb /= Inferred ]
-              rhs  = foldl mk_vta (nlHsVar dm_name) visible_inst_tys
+              rhs  = foldl' mk_vta (nlHsVar dm_name) visible_inst_tys
               bind = noLoc $ mkTopFunBind Generated fn $
                              [mkSimpleMatch (mkPrefixFunRhs fn) [] rhs]
 
@@ -1622,8 +1667,8 @@ mkDefMethBind clas inst_tys sel_id dm_name
        ; return (bind, inline_prags) }
   where
     mk_vta :: LHsExpr GhcRn -> Type -> LHsExpr GhcRn
-    mk_vta fun ty = noLoc (HsAppType (mkEmptyWildCardBndrs $ nlHsParTy
-                                      $ noLoc $ XHsType $ NHsCoreTy ty) fun)
+    mk_vta fun ty = noLoc (HsAppType noExt fun (mkEmptyWildCardBndrs $ nlHsParTy
+                                                $ noLoc $ XHsType $ NHsCoreTy ty))
        -- NB: use visible type application
        -- See Note [Default methods in instances]
 

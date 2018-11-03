@@ -11,6 +11,7 @@ test('T2881',      just_ghci, compile_and_run, [''])
 
 test('T3171',
      [when(opsys('mingw32'),skip),
+      skip, # This test is quite flaky (#15383)
       req_interp,
       combined_output],
      run_command,
@@ -30,3 +31,8 @@ test('T12549',     just_ghci, ghci_script, ['T12549.script'])
 test('BinaryArray', normal, compile_and_run, [''])
 test('T14125a',    just_ghci, ghci_script, ['T14125a.script'])
 test('T13825-ghci',just_ghci, ghci_script, ['T13825-ghci.script'])
+test('T14963a', just_ghci, ghci_script, ['T14963a.script'])
+test('T14963b', just_ghci, ghci_script, ['T14963b.script'])
+test('T14963c', [extra_hc_opts("-fdefer-type-errors")], ghci_script, ['T14963c.script'])
+test('T15007', just_ghci, ghci_script, ['T15007.script'])
+test('T15806',     just_ghci, ghci_script, ['T15806.script'])

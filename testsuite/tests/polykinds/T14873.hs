@@ -2,8 +2,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeInType #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PolyKinds #-}
 module T14873 where
 
 import Data.Kind (Type)
@@ -28,7 +29,7 @@ class PColumn (f :: Type -> Type) where
   type Col (x :: f a) (y :: a) :: Bool
 
 class SColumn (f :: Type -> Type) where
-  sCol :: forall (x :: f a) (y :: a).
+  sCol :: forall a (x :: f a) (y :: a).
     Sing x -> Sing y -> Sing (Col x y :: Bool)
 
 instance (SColumn f, SingI x) => SingI (ColSym1 (x :: f a) :: a ~> Bool) where

@@ -46,7 +46,8 @@
 #include "RetainerProfile.h"
 #include "LdvProfile.h"
 #include "RaiseAsync.h"
-#include "Stable.h"
+#include "StableName.h"
+#include "StablePtr.h"
 #include "CheckUnload.h"
 #include "CNF.h"
 #include "RtsFlags.h"
@@ -120,8 +121,6 @@ uint32_t mutlist_MUTVARS,
     mutlist_TVAR_WATCH_QUEUE,
     mutlist_TREC_CHUNK,
     mutlist_TREC_HEADER,
-    mutlist_ATOMIC_INVARIANT,
-    mutlist_INVARIANT_CHECK_QUEUE,
     mutlist_OTHERS;
 #endif
 
@@ -130,7 +129,9 @@ uint32_t mutlist_MUTVARS,
 gc_thread **gc_threads = NULL;
 
 #if !defined(THREADED_RTS)
-StgWord8 the_gc_thread[sizeof(gc_thread) + 64 * sizeof(gen_workspace)];
+// Must be aligned to 64-bytes to meet stated 64-byte alignment of gen_workspace
+StgWord8 the_gc_thread[sizeof(gc_thread) + 64 * sizeof(gen_workspace)]
+    ATTRIBUTE_ALIGNED(64);
 #endif
 
 // Number of threads running in *this* GC.  Affects how many
@@ -238,8 +239,9 @@ GarbageCollect (uint32_t collect_gen,
   // tell the stats department that we've started a GC
   stat_startGC(cap, gct);
 
-  // lock the StablePtr table
-  stableLock();
+  // Lock the StablePtr table. This prevents FFI calls manipulating
+  // the table from occurring during GC.
+  stablePtrLock();
 
 #if defined(DEBUG)
   mutlist_MUTVARS = 0;
@@ -249,8 +251,6 @@ GarbageCollect (uint32_t collect_gen,
   mutlist_TVAR_WATCH_QUEUE = 0;
   mutlist_TREC_CHUNK = 0;
   mutlist_TREC_HEADER = 0;
-  mutlist_ATOMIC_INVARIANT = 0;
-  mutlist_INVARIANT_CHECK_QUEUE = 0;
   mutlist_OTHERS = 0;
 #endif
 
@@ -407,7 +407,10 @@ GarbageCollect (uint32_t collect_gen,
   initWeakForGC();
 
   // Mark the stable pointer table.
-  markStableTables(mark_root, gct);
+  markStablePtrTable(mark_root, gct);
+
+  // Remember old stable name addresses.
+  rememberOldStableNameAddresses ();
 
   /* -------------------------------------------------------------------------
    * Repeatedly scavenge all the areas we know about until there's no
@@ -433,7 +436,7 @@ GarbageCollect (uint32_t collect_gen,
   shutdown_gc_threads(gct->thread_index, idle_cap);
 
   // Now see which stable names are still alive.
-  gcStableTables();
+  gcStableNameTable();
 
 #if defined(THREADED_RTS)
   if (n_gc_threads == 1) {
@@ -554,13 +557,11 @@ GarbageCollect (uint32_t collect_gen,
         copied +=  mut_list_size;
 
         debugTrace(DEBUG_gc,
-                   "mut_list_size: %lu (%d vars, %d arrays, %d MVARs, %d TVARs, %d TVAR_WATCH_QUEUEs, %d TREC_CHUNKs, %d TREC_HEADERs, %d ATOMIC_INVARIANTs, %d INVARIANT_CHECK_QUEUEs, %d others)",
+                   "mut_list_size: %lu (%d vars, %d arrays, %d MVARs, %d TVARs, %d TVAR_WATCH_QUEUEs, %d TREC_CHUNKs, %d TREC_HEADERs, %d others)",
                    (unsigned long)(mut_list_size * sizeof(W_)),
                    mutlist_MUTVARS, mutlist_MUTARRS, mutlist_MVARS,
                    mutlist_TVAR, mutlist_TVAR_WATCH_QUEUE,
                    mutlist_TREC_CHUNK, mutlist_TREC_HEADER,
-                   mutlist_ATOMIC_INVARIANT,
-                   mutlist_INVARIANT_CHECK_QUEUE,
                    mutlist_OTHERS);
     }
 
@@ -734,15 +735,15 @@ GarbageCollect (uint32_t collect_gen,
   if (major_gc) { gcCAFs(); }
 #endif
 
-  // Update the stable pointer hash table.
-  updateStableTables(major_gc);
+  // Update the stable name hash table
+  updateStableNameTable(major_gc);
 
   // unlock the StablePtr table.  Must be before scheduleFinalizers(),
   // because a finalizer may call hs_free_fun_ptr() or
   // hs_free_stable_ptr(), both of which access the StablePtr table.
-  stableUnlock();
+  stablePtrUnlock();
 
-  // Must be after stableUnlock(), because it might free stable ptrs.
+  // Must be after stablePtrUnlock(), because it might free stable ptrs.
   if (major_gc) {
       checkUnload (gct->scavenged_static_objects);
   }
@@ -1852,7 +1853,10 @@ static void gcCAFs(void)
         info = get_itbl((StgClosure*)p);
         ASSERT(info->type == IND_STATIC);
 
-        if (p->static_link == NULL) {
+        // See Note [STATIC_LINK fields] in Storage.h
+        // This condition identifies CAFs that have just been GC'd and
+        // don't have static_link==3 which means they should be ignored.
+        if ((((StgWord)(p->static_link)&STATIC_BITS) | prev_static_flag) != 3) {
             debugTrace(DEBUG_gccafs, "CAF gc'd at 0x%p", p);
             SET_INFO((StgClosure*)p,&stg_GCD_CAF_info); // stub it
             if (prev == NULL) {

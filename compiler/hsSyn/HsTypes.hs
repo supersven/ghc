@@ -20,7 +20,7 @@ module HsTypes (
         HsType(..), NewHsTypeX(..), LHsType, HsKind, LHsKind,
         HsTyVarBndr(..), LHsTyVarBndr,
         LHsQTyVars(..), HsQTvsRn(..),
-        HsImplicitBndrs(..), HsIBRn(..),
+        HsImplicitBndrs(..),
         HsWildCardBndrs(..),
         LHsSigType, LHsSigWcType, LHsWcType,
         HsTupleSort(..),
@@ -28,7 +28,6 @@ module HsTypes (
         HsContext, LHsContext,
         HsTyLit(..),
         HsIPName(..), hsIPNameFS,
-        HsAppType(..),LHsAppType,
 
         LBangType, BangType,
         HsSrcBang(..), HsImplBang(..),
@@ -57,16 +56,16 @@ module HsTypes (
         splitLHsInstDeclTy, getLHsInstDeclHead, getLHsInstDeclClass_maybe,
         splitLHsPatSynTy,
         splitLHsForAllTy, splitLHsQualTy, splitLHsSigmaTy,
-        splitHsFunType, splitHsAppsTy,
-        splitHsAppTys, getAppsTyHead_maybe, hsTyGetAppHead_maybe,
-        mkHsOpTy, mkHsAppTy, mkHsAppTys, mkHsAppsTy,
+        splitHsFunType,
+        splitHsAppTys, hsTyGetAppHead_maybe,
+        mkHsOpTy, mkHsAppTy, mkHsAppTys,
         ignoreParens, hsSigType, hsSigWcType,
         hsLTyVarBndrToType, hsLTyVarBndrsToTypes,
 
         -- Printing
-        pprHsType, pprHsForAll, pprHsForAllTvs, pprHsForAllExtra,
+        pprHsType, pprHsForAll, pprHsForAllExtra, pprHsExplicitForAll,
         pprHsContext, pprHsContextNoArrow, pprHsContextMaybe,
-        isCompoundHsType, parenthesizeCompoundHsType
+        hsTypeNeedsParens, parenthesizeHsType, parenthesizeHsContext
     ) where
 
 import GhcPrelude
@@ -92,6 +91,7 @@ import FastString
 import Maybes( isJust )
 
 import Data.Data hiding ( Fixity, Prefix, Infix )
+import Data.List ( foldl' )
 import Data.Maybe ( fromMaybe )
 
 {-
@@ -218,6 +218,49 @@ Note carefully:
 * After type checking is done, we report what types the wildcards
   got unified with.
 
+Note [Ordering of implicit variables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Since the advent of -XTypeApplications, GHC makes promises about the ordering
+of implicit variable quantification. Specifically, we offer that implicitly
+quantified variables (such as those in const :: a -> b -> a, without a `forall`)
+will occur in left-to-right order of first occurrence. Here are a few examples:
+
+  const :: a -> b -> a       -- forall a b. ...
+  f :: Eq a => b -> a -> a   -- forall a b. ...  contexts are included
+
+  type a <-< b = b -> a
+  g :: a <-< b               -- forall a b. ...  type synonyms matter
+
+  class Functor f where
+    fmap :: (a -> b) -> f a -> f b   -- forall f a b. ...
+    -- The f is quantified by the class, so only a and b are considered in fmap
+
+This simple story is complicated by the possibility of dependency: all variables
+must come after any variables mentioned in their kinds.
+
+  typeRep :: Typeable a => TypeRep (a :: k)   -- forall k a. ...
+
+The k comes first because a depends on k, even though the k appears later than
+the a in the code. Thus, GHC does a *stable topological sort* on the variables.
+By "stable", we mean that any two variables who do not depend on each other
+preserve their existing left-to-right ordering.
+
+Implicitly bound variables are collected by the extract- family of functions
+(extractHsTysRdrTyVars, extractHsTyVarBndrsKVs, etc.) in RnTypes.
+These functions thus promise to keep left-to-right ordering.
+Look for pointers to this note to see the places where the action happens.
+
+Note that we also maintain this ordering in kind signatures. Even though
+there's no visible kind application (yet), having implicit variables be
+quantified in left-to-right order in kind signatures is nice since:
+
+* It's consistent with the treatment for type signatures.
+* It can affect how types are displayed with -fprint-explicit-kinds (see
+  #15568 for an example), which is a situation where knowing the order in
+  which implicit variables are quantified can be useful.
+* In the event that visible kind application is implemented, the order in
+  which we would expect implicit variables to be ordered in kinds will have
+  already been established.
 -}
 
 -- | Located Haskell Context
@@ -302,21 +345,19 @@ isEmptyLHsQTvs _                = False
 
 -- | Haskell Implicit Binders
 data HsImplicitBndrs pass thing   -- See Note [HsType binders]
-  = HsIB { hsib_ext  :: XHsIB pass thing
+  = HsIB { hsib_ext  :: XHsIB pass thing -- after renamer: [Name]
+                                         -- Implicitly-bound kind & type vars
+                                         -- Order is important; see
+                                         -- Note [Ordering of implicit variables]
+                                         -- in RnTypes
+
          , hsib_body :: thing            -- Main payload (type or list of types)
     }
   | XHsImplicitBndrs (XXHsImplicitBndrs pass thing)
 
-data HsIBRn
-  = HsIBRn { hsib_vars :: [Name] -- Implicitly-bound kind & type vars
-           , hsib_closed :: Bool -- Taking the hsib_vars into account,
-                                 -- is the payload closed? Used in
-                                 -- TcHsType.decideKindGeneralisationPlan
-    } deriving Data
-
 type instance XHsIB              GhcPs _ = NoExt
-type instance XHsIB              GhcRn _ = HsIBRn
-type instance XHsIB              GhcTc _ = HsIBRn
+type instance XHsIB              GhcRn _ = [Name]
+type instance XHsIB              GhcTc _ = [Name]
 
 type instance XXHsImplicitBndrs  (GhcPass _) _ = NoExt
 
@@ -397,9 +438,7 @@ mkHsWildCardBndrs x = HsWC { hswc_body = x
 -- Add empty binders.  This is a bit suspicious; what if
 -- the wrapped thing had free type variables?
 mkEmptyImplicitBndrs :: thing -> HsImplicitBndrs GhcRn thing
-mkEmptyImplicitBndrs x = HsIB { hsib_ext = HsIBRn
-                                  { hsib_vars   = []
-                                  , hsib_closed = False }
+mkEmptyImplicitBndrs x = HsIB { hsib_ext = []
                               , hsib_body = x }
 
 mkEmptyWildCardBndrs :: thing -> HsWildCardBndrs GhcRn thing
@@ -487,11 +526,6 @@ data HsType pass
 
       -- For details on above see note [Api annotations] in ApiAnnotation
 
-  | HsAppsTy            (XAppsTy pass)
-                        [LHsAppType pass] -- Used only before renaming,
-                                          -- Note [HsAppsTy]
-      -- ^ - 'ApiAnnotation.AnnKeywordId' : None
-
   | HsAppTy             (XAppTy pass)
                         (LHsType pass)
                         (LHsType pass)
@@ -510,13 +544,6 @@ data HsType pass
                         (LHsType pass)  -- Element type
       -- ^ - 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnOpen' @'['@,
       --         'ApiAnnotation.AnnClose' @']'@
-
-      -- For details on above see note [Api annotations] in ApiAnnotation
-
-  | HsPArrTy            (XPArrTy pass)
-                        (LHsType pass)  -- Elem. type of parallel array: [:t:]
-      -- ^ - 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnOpen' @'[:'@,
-      --         'ApiAnnotation.AnnClose' @':]'@
 
       -- For details on above see note [Api annotations] in ApiAnnotation
 
@@ -561,17 +588,10 @@ data HsType pass
 
       -- For details on above see note [Api annotations] in ApiAnnotation
 
-  | HsEqTy              (XEqTy pass)
-                        (LHsType pass)   -- ty1 ~ ty2
-                        (LHsType pass)   -- Always allowed even without
-                                         -- TypeOperators, and has special
-                                         -- kinding rule
-      -- ^
-      -- > ty1 ~ ty2
-      --
-      -- - 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnTilde'
-
-      -- For details on above see note [Api annotations] in ApiAnnotation
+  | HsStarTy            (XStarTy pass)
+                        Bool             -- Is this the Unicode variant?
+                                         -- Note [HsStarTy]
+      -- ^ - 'ApiAnnotation.AnnKeywordId' : None
 
   | HsKindSig           (XKindSig pass)
                         (LHsType pass)  -- (ty :: kind)
@@ -665,17 +685,15 @@ instance Outputable NewHsTypeX where
 type instance XForAllTy        (GhcPass _) = NoExt
 type instance XQualTy          (GhcPass _) = NoExt
 type instance XTyVar           (GhcPass _) = NoExt
-type instance XAppsTy          (GhcPass _) = NoExt
 type instance XAppTy           (GhcPass _) = NoExt
 type instance XFunTy           (GhcPass _) = NoExt
 type instance XListTy          (GhcPass _) = NoExt
-type instance XPArrTy          (GhcPass _) = NoExt
 type instance XTupleTy         (GhcPass _) = NoExt
 type instance XSumTy           (GhcPass _) = NoExt
 type instance XOpTy            (GhcPass _) = NoExt
 type instance XParTy           (GhcPass _) = NoExt
 type instance XIParamTy        (GhcPass _) = NoExt
-type instance XEqTy            (GhcPass _) = NoExt
+type instance XStarTy          (GhcPass _) = NoExt
 type instance XKindSig         (GhcPass _) = NoExt
 
 type instance XSpliceTy        GhcPs = NoExt
@@ -716,27 +734,6 @@ newtype HsWildCardInfo        -- See Note [The wildcard story for types]
       deriving Data
       -- A anonymous wild card ('_'). A fresh Name is generated for
       -- each individual anonymous wildcard during renaming
-
--- | Located Haskell Application Type
-type LHsAppType pass = Located (HsAppType pass)
-      -- ^ 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnSimpleQuote'
-
--- | Haskell Application Type
-data HsAppType pass
-  = HsAppInfix (XAppInfix pass)
-               (Located (IdP pass)) -- either a symbol or an id in backticks
-  | HsAppPrefix (XAppPrefix pass)
-                (LHsType pass)      -- anything else, including things like (+)
-  | XAppType
-      (XXAppType pass)
-
-type instance XAppInfix   (GhcPass _) = NoExt
-type instance XAppPrefix  (GhcPass _) = NoExt
-type instance XXAppType   (GhcPass _) = NoExt
-
-instance (p ~ GhcPass pass, OutputableBndrId p)
-       => Outputable (HsAppType p) where
-  ppr = ppr_app_ty
 
 {-
 Note [HsForAllTy tyvar binders]
@@ -793,16 +790,18 @@ HsTyVar: A name in a type or kind.
   The 'Promoted' field in an HsTyVar captures whether the type was promoted in
   the source code by prefixing an apostrophe.
 
-Note [HsAppsTy]
+Note [HsStarTy]
 ~~~~~~~~~~~~~~~
-How to parse
+When the StarIsType extension is enabled, we want to treat '*' and its Unicode
+variant identically to 'Data.Kind.Type'. Unfortunately, doing so in the parser
+would mean that when we pretty-print it back, we don't know whether the user
+wrote '*' or 'Type', and lose the parse/ppr roundtrip property.
 
-  Foo * Int
+As a workaround, we parse '*' as HsStarTy (if it stands for 'Data.Kind.Type')
+and then desugar it to 'Data.Kind.Type' in the typechecker (see tc_hs_type).
+When '*' is a regular type operator (StarIsType is disabled), HsStarTy is not
+involved.
 
-? Is it `(*) Foo Int` or `Foo GHC.Types.* Int`? There's no way to know until renaming.
-So we just take type expressions like this and put each component in a list, so be
-sorted out in the renamer. The sorting out is done by RnTypes.mkHsOpTyRn. This means
-that the parser should never produce HsAppTy or HsOpTy.
 
 Note [Promoted lists and tuples]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -936,7 +935,7 @@ hsWcScopedTvs :: LHsSigWcType GhcRn -> [Name]
 -- because they scope in the same way
 hsWcScopedTvs sig_ty
   | HsWC { hswc_ext = nwcs, hswc_body = sig_ty1 }  <- sig_ty
-  , HsIB { hsib_ext = HsIBRn { hsib_vars = vars}
+  , HsIB { hsib_ext = vars
          , hsib_body = sig_ty2 } <- sig_ty1
   = case sig_ty2 of
       L _ (HsForAllTy { hst_bndrs = tvs }) -> vars ++ nwcs ++
@@ -950,7 +949,7 @@ hsWcScopedTvs (XHsWildCardBndrs _) = panic "hsWcScopedTvs"
 hsScopedTvs :: LHsSigType GhcRn -> [Name]
 -- Same as hsWcScopedTvs, but for a LHsSigType
 hsScopedTvs sig_ty
-  | HsIB { hsib_ext = HsIBRn { hsib_vars = vars }
+  | HsIB { hsib_ext = vars
          , hsib_body = sig_ty2 } <- sig_ty
   , L _ (HsForAllTy { hst_bndrs = tvs }) <- sig_ty2
   = vars ++ map hsLTyVarName tvs
@@ -1044,17 +1043,11 @@ mkHsOpTy ty1 op ty2 = HsOpTy noExt ty1 op ty2
 
 mkHsAppTy :: LHsType (GhcPass p) -> LHsType (GhcPass p) -> LHsType (GhcPass p)
 mkHsAppTy t1 t2
-  = addCLoc t1 t2 (HsAppTy noExt t1 (parenthesizeCompoundHsType t2))
+  = addCLoc t1 t2 (HsAppTy noExt t1 (parenthesizeHsType appPrec t2))
 
 mkHsAppTys :: LHsType (GhcPass p) -> [LHsType (GhcPass p)]
            -> LHsType (GhcPass p)
-mkHsAppTys = foldl mkHsAppTy
-
-mkHsAppsTy :: [LHsAppType GhcPs] -> HsType GhcPs
--- In the common case of a singleton non-operator,
--- avoid the clutter of wrapping in a HsAppsTy
-mkHsAppsTy [L _ (HsAppPrefix _ (L _ ty))] = ty
-mkHsAppsTy app_tys                        = HsAppsTy NoExt app_tys
+mkHsAppTys = foldl' mkHsAppTy
 
 {-
 ************************************************************************
@@ -1091,38 +1084,7 @@ splitHsFunType orig_ty@(L _ (HsAppTy _ t1 t2))
 
 splitHsFunType other = ([], other)
 
---------------------------------
--- | Retrieves the head of an HsAppsTy, if this can be done unambiguously,
--- without consulting fixities.
-getAppsTyHead_maybe :: [LHsAppType (GhcPass p)]
-                    -> Maybe ( LHsType (GhcPass p)
-                             , [LHsType (GhcPass p)], LexicalFixity)
-getAppsTyHead_maybe tys = case splitHsAppsTy tys of
-  ([app1:apps], []) ->  -- no symbols, some normal types
-    Just (mkHsAppTys app1 apps, [], Prefix)
-  ([app1l:appsl, app1r:appsr], [L loc op]) ->  -- one operator
-    Just ( L loc (HsTyVar noExt NotPromoted (L loc op))
-         , [mkHsAppTys app1l appsl, mkHsAppTys app1r appsr], Infix)
-  _ -> -- can't figure it out
-    Nothing
-
--- | Splits a [HsAppType pass] (the payload of an HsAppsTy) into regions of
--- prefix types (normal types) and infix operators.
--- If @splitHsAppsTy tys = (non_syms, syms)@, then @tys@ starts with the first
--- element of @non_syms@ followed by the first element of @syms@ followed by
--- the next element of @non_syms@, etc. It is guaranteed that the non_syms list
--- has one more element than the syms list.
-splitHsAppsTy :: [LHsAppType pass] -> ([[LHsType pass]], [Located (IdP pass)])
-splitHsAppsTy = go [] [] []
-  where
-    go acc acc_non acc_sym [] = (reverse (reverse acc : acc_non), reverse acc_sym)
-    go acc acc_non acc_sym (L _ (HsAppPrefix _ ty) : rest)
-      = go (ty : acc) acc_non acc_sym rest
-    go acc acc_non acc_sym (L _ (HsAppInfix _ op) : rest)
-      = go [] (reverse acc : acc_non) (op : acc_sym) rest
-    go _ _ _ (L _ (XAppType _):_) = panic "splitHsAppsTy"
-
--- Retrieve the name of the "head" of a nested type application
+-- retrieve the name of the "head" of a nested type application
 -- somewhat like splitHsAppTys, but a little more thorough
 -- used to examine the result of a GADT-like datacon, so it doesn't handle
 -- *all* cases (like lists, tuples, (~), etc.)
@@ -1131,9 +1093,6 @@ hsTyGetAppHead_maybe :: LHsType (GhcPass p)
 hsTyGetAppHead_maybe = go []
   where
     go tys (L _ (HsTyVar _ _ ln))          = Just (ln, tys)
-    go tys (L _ (HsAppsTy _ apps))
-      | Just (head, args, _) <- getAppsTyHead_maybe apps
-                                           = go (args ++ tys) head
     go tys (L _ (HsAppTy _ l r))           = go (r : tys) l
     go tys (L _ (HsOpTy _ l (L loc n) r))  = Just (L loc n, l : r : tys)
     go tys (L _ (HsParTy _ t))             = go tys t
@@ -1142,7 +1101,6 @@ hsTyGetAppHead_maybe = go []
 
 splitHsAppTys :: LHsType GhcRn -> [LHsType GhcRn]
               -> (LHsType GhcRn, [LHsType GhcRn])
-  -- no need to worry about HsAppsTy here
 splitHsAppTys (L _ (HsAppTy _ f a)) as = splitHsAppTys f (a:as)
 splitHsAppTys (L _ (HsParTy _ f))   as = splitHsAppTys f as
 splitHsAppTys f                     as = (f,as)
@@ -1181,7 +1139,7 @@ splitLHsQualTy body              = (noLoc [], body)
 splitLHsInstDeclTy :: LHsSigType GhcRn
                    -> ([Name], LHsContext GhcRn, LHsType GhcRn)
 -- Split up an instance decl type, returning the pieces
-splitLHsInstDeclTy (HsIB { hsib_ext = HsIBRn { hsib_vars = itkvs }
+splitLHsInstDeclTy (HsIB { hsib_ext = itkvs
                          , hsib_body = inst_ty })
   | (tvs, cxt, body_ty) <- splitLHsSigmaTy inst_ty
   = (itkvs ++ map hsLTyVarName tvs, cxt, body_ty)
@@ -1218,19 +1176,19 @@ type LFieldOcc pass = Located (FieldOcc pass)
 -- Represents an *occurrence* of an unambiguous field.  We store
 -- both the 'RdrName' the user originally wrote, and after the
 -- renamer, the selector function.
-data FieldOcc pass = FieldOcc { extFieldOcc     :: XFieldOcc pass
+data FieldOcc pass = FieldOcc { extFieldOcc     :: XCFieldOcc pass
                               , rdrNameFieldOcc :: Located RdrName
                                  -- ^ See Note [Located RdrNames] in HsExpr
                               }
 
   | XFieldOcc
       (XXFieldOcc pass)
-deriving instance (p ~ GhcPass pass, Eq (XFieldOcc p)) => Eq  (FieldOcc p)
-deriving instance (p ~ GhcPass pass, Ord (XFieldOcc p)) => Ord (FieldOcc p)
+deriving instance (p ~ GhcPass pass, Eq (XCFieldOcc p)) => Eq  (FieldOcc p)
+deriving instance (p ~ GhcPass pass, Ord (XCFieldOcc p)) => Ord (FieldOcc p)
 
-type instance XFieldOcc GhcPs = NoExt
-type instance XFieldOcc GhcRn = Name
-type instance XFieldOcc GhcTc = Id
+type instance XCFieldOcc GhcPs = NoExt
+type instance XCFieldOcc GhcRn = Name
+type instance XCFieldOcc GhcTc = Id
 
 type instance XXFieldOcc (GhcPass _) = NoExt
 
@@ -1340,6 +1298,8 @@ instance Outputable HsWildCardInfo where
 pprAnonWildCard :: SDoc
 pprAnonWildCard = char '_'
 
+-- | Prints a forall; When passed an empty list, prints @forall.@ only when
+-- @-dppr-debug@
 pprHsForAll :: (OutputableBndrId (GhcPass p))
             => [LHsTyVarBndr (GhcPass p)] -> LHsContext (GhcPass p) -> SDoc
 pprHsForAll = pprHsForAllExtra Nothing
@@ -1355,15 +1315,17 @@ pprHsForAllExtra :: (OutputableBndrId (GhcPass p))
                  => Maybe SrcSpan -> [LHsTyVarBndr (GhcPass p)]
                  -> LHsContext (GhcPass p) -> SDoc
 pprHsForAllExtra extra qtvs cxt
-  = pprHsForAllTvs qtvs <+> pprHsContextExtra show_extra (unLoc cxt)
+  = pp_forall <+> pprHsContextExtra (isJust extra) (unLoc cxt)
   where
-    show_extra = isJust extra
+    pp_forall | null qtvs = whenPprDebug (forAllLit <> dot)
+              | otherwise = forAllLit <+> interppSP qtvs <> dot
 
-pprHsForAllTvs :: (OutputableBndrId (GhcPass p))
-               => [LHsTyVarBndr (GhcPass p)] -> SDoc
-pprHsForAllTvs qtvs
-  | null qtvs = whenPprDebug (forAllLit <+> dot)
-  | otherwise = forAllLit <+> interppSP qtvs <> dot
+-- | Version of 'pprHsForall' or 'pprHsForallExtra' that will always print
+-- @forall.@ when passed @Just []@. Prints nothing if passed 'Nothing'
+pprHsExplicitForAll :: (OutputableBndrId (GhcPass p))
+               => Maybe [LHsTyVarBndr (GhcPass p)] -> SDoc
+pprHsExplicitForAll (Just qtvs) = forAllLit <+> interppSP qtvs <> dot
+pprHsExplicitForAll Nothing     = empty
 
 pprHsContext :: (OutputableBndrId (GhcPass p)) => HsContext (GhcPass p) -> SDoc
 pprHsContext = maybe empty (<+> darrow) . pprHsContextMaybe
@@ -1432,7 +1394,7 @@ ppr_mono_lty ty = ppr_mono_ty (unLoc ty)
 
 ppr_mono_ty :: (OutputableBndrId (GhcPass p)) => HsType (GhcPass p) -> SDoc
 ppr_mono_ty (HsForAllTy { hst_bndrs = tvs, hst_body = ty })
-  = sep [pprHsForAllTvs tvs, ppr_mono_lty ty]
+  = sep [pprHsForAll tvs (noLoc []), ppr_mono_lty ty]
 
 ppr_mono_ty (HsQualTy { hst_ctxt = L _ ctxt, hst_body = ty })
   = sep [pprHsContextAlways ctxt, ppr_mono_lty ty]
@@ -1452,9 +1414,8 @@ ppr_mono_ty (HsTupleTy _ con tys) = tupleParens std_con (pprWithCommas ppr tys)
 ppr_mono_ty (HsSumTy _ tys)
   = tupleParens UnboxedTuple (pprWithBars ppr tys)
 ppr_mono_ty (HsKindSig _ ty kind)
-  = parens (ppr_mono_lty ty <+> dcolon <+> ppr kind)
+  = ppr_mono_lty ty <+> dcolon <+> ppr kind
 ppr_mono_ty (HsListTy _ ty)       = brackets (ppr_mono_lty ty)
-ppr_mono_ty (HsPArrTy _ ty)       = paBrackets (ppr_mono_lty ty)
 ppr_mono_ty (HsIParamTy _ n ty)   = (ppr n <+> dcolon <+> ppr_mono_lty ty)
 ppr_mono_ty (HsSpliceTy _ s)      = pprSplice s
 ppr_mono_ty (HsExplicitListTy _ Promoted tys)
@@ -1465,11 +1426,7 @@ ppr_mono_ty (HsExplicitTupleTy _ tys) = quote $ parens (interpp'SP tys)
 ppr_mono_ty (HsTyLit _ t)       = ppr_tylit t
 ppr_mono_ty (HsWildCardTy {})   = char '_'
 
-ppr_mono_ty (HsEqTy _ ty1 ty2)
-  = ppr_mono_lty ty1 <+> char '~' <+> ppr_mono_lty ty2
-
-ppr_mono_ty (HsAppsTy _ tys)
-  = hsep (map (ppr_app_ty . unLoc) tys)
+ppr_mono_ty (HsStarTy _ isUni)  = char (if isUni then '★' else '*')
 
 ppr_mono_ty (HsAppTy _ fun_ty arg_ty)
   = hsep [ppr_mono_lty fun_ty, ppr_mono_lty arg_ty]
@@ -1502,38 +1459,55 @@ ppr_fun_ty ty1 ty2
     sep [p1, text "->" <+> p2]
 
 --------------------------
-ppr_app_ty :: (OutputableBndrId (GhcPass p)) => HsAppType (GhcPass p) -> SDoc
-ppr_app_ty (HsAppInfix _ (L _ n)) = pprInfixOcc n
-ppr_app_ty (HsAppPrefix _ (L _ (HsTyVar _ NotPromoted (L _ n))))
-  = pprPrefixOcc n
-ppr_app_ty (HsAppPrefix _ (L _ (HsTyVar _ Promoted  (L _ n))))
-  = space <> quote (pprPrefixOcc n) -- We need a space before the ' above, so
-                                    -- the parser does not attach it to the
-                                    -- previous symbol
-ppr_app_ty (HsAppPrefix _ ty) = ppr_mono_lty ty
-
-ppr_app_ty (XAppType ty)      = ppr ty
-
---------------------------
 ppr_tylit :: HsTyLit -> SDoc
 ppr_tylit (HsNumTy _ i) = integer i
 ppr_tylit (HsStrTy _ s) = text (show s)
 
 
--- | Return 'True' for compound types that will need parentheses when used in
--- an argument position.
-isCompoundHsType :: LHsType pass -> Bool
-isCompoundHsType (L _ HsAppTy{} ) = True
-isCompoundHsType (L _ HsAppsTy{}) = True
-isCompoundHsType (L _ HsEqTy{}  ) = True
-isCompoundHsType (L _ HsFunTy{} ) = True
-isCompoundHsType (L _ HsOpTy{}  ) = True
-isCompoundHsType _                = False
+-- | @'hsTypeNeedsParens' p t@ returns 'True' if the type @t@ needs parentheses
+-- under precedence @p@.
+hsTypeNeedsParens :: PprPrec -> HsType pass -> Bool
+hsTypeNeedsParens p = go
+  where
+    go (HsForAllTy{})        = p >= funPrec
+    go (HsQualTy{})          = p >= funPrec
+    go (HsBangTy{})          = p > topPrec
+    go (HsRecTy{})           = False
+    go (HsTyVar{})           = False
+    go (HsFunTy{})           = p >= funPrec
+    go (HsTupleTy{})         = False
+    go (HsSumTy{})           = False
+    go (HsKindSig{})         = p >= sigPrec
+    go (HsListTy{})          = False
+    go (HsIParamTy{})        = p > topPrec
+    go (HsSpliceTy{})        = False
+    go (HsExplicitListTy{})  = False
+    go (HsExplicitTupleTy{}) = False
+    go (HsTyLit{})           = False
+    go (HsWildCardTy{})      = False
+    go (HsStarTy{})          = False
+    go (HsAppTy{})           = p >= appPrec
+    go (HsOpTy{})            = p >= opPrec
+    go (HsParTy{})           = False
+    go (HsDocTy _ (L _ t) _) = go t
+    go (XHsType{})           = False
 
--- | @'parenthesizeCompoundHsType' ty@ checks if @'isCompoundHsType' ty@ is
+-- | @'parenthesizeHsType' p ty@ checks if @'hsTypeNeedsParens' p ty@ is
 -- true, and if so, surrounds @ty@ with an 'HsParTy'. Otherwise, it simply
 -- returns @ty@.
-parenthesizeCompoundHsType :: LHsType (GhcPass p) -> LHsType (GhcPass p)
-parenthesizeCompoundHsType ty@(L loc _)
-  | isCompoundHsType ty = L loc (HsParTy NoExt ty)
-  | otherwise           = ty
+parenthesizeHsType :: PprPrec -> LHsType (GhcPass p) -> LHsType (GhcPass p)
+parenthesizeHsType p lty@(L loc ty)
+  | hsTypeNeedsParens p ty = L loc (HsParTy NoExt lty)
+  | otherwise              = lty
+
+-- | @'parenthesizeHsContext' p ctxt@ checks if @ctxt@ is a single constraint
+-- @c@ such that @'hsTypeNeedsParens' p c@ is true, and if so, surrounds @c@
+-- with an 'HsParTy' to form a parenthesized @ctxt@. Otherwise, it simply
+-- returns @ctxt@ unchanged.
+parenthesizeHsContext :: PprPrec
+                      -> LHsContext (GhcPass p) -> LHsContext (GhcPass p)
+parenthesizeHsContext p lctxt@(L loc ctxt) =
+  case ctxt of
+    [c] -> L loc [parenthesizeHsType p c]
+    _   -> lctxt -- Other contexts are already "parenthesized" by virtue of
+                 -- being tuples.

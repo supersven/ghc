@@ -96,7 +96,7 @@ dsIPBinds (IPBinds ev_binds ip_binds) body
     ds_ip_bind (L _ (IPBind _ ~(Right n) e)) body
       = do e' <- dsLExpr e
            return (Let (NonRec n e') body)
-    ds_ip_bind (L _ (XCIPBind _)) _ = panic "dsIPBinds"
+    ds_ip_bind (L _ (XIPBind _)) _ = panic "dsIPBinds"
 dsIPBinds (XHsIPBinds _) _ = panic "dsIPBinds"
 
 -------------------------
@@ -257,7 +257,7 @@ ds_expr :: Bool   -- are we directly inside an HsWrap?
                   -- See Wrinkle in Note [Detecting forced eta expansion]
         -> HsExpr GhcTc -> DsM CoreExpr
 ds_expr _ (HsPar _ e)            = dsLExpr e
-ds_expr _ (ExprWithTySig _ e)    = dsLExpr e
+ds_expr _ (ExprWithTySig _ e _)  = dsLExpr e
 ds_expr w (HsVar _ (L _ var))    = dsHsVar w var
 ds_expr _ (HsUnboundVar {})      = panic "dsExpr: HsUnboundVar" -- Typechecker eliminates them
 ds_expr w (HsConLikeOut _ con)   = dsConLike w con
@@ -302,7 +302,7 @@ ds_expr _ e@(HsApp _ fun arg)
        ; dsWhenNoErrs (dsLExprNoLP arg)
                       (\arg' -> mkCoreAppDs (text "HsApp" <+> ppr e) fun' arg') }
 
-ds_expr _ (HsAppType _ e)
+ds_expr _ (HsAppType _ e _)
     -- ignore type arguments here; they're in the wrappers instead at this point
   = dsLExpr e
 
@@ -423,7 +423,6 @@ ds_expr _ (HsLet _ binds body) = do
 -- because the interpretation of `stmts' depends on what sort of thing it is.
 --
 ds_expr _ (HsDo res_ty ListComp (L _ stmts)) = dsListComp stmts res_ty
-ds_expr _ (HsDo _ PArrComp      (L _ stmts)) = dsPArrComp (map unLoc stmts)
 ds_expr _ (HsDo _ DoExpr        (L _ stmts)) = dsDo stmts
 ds_expr _ (HsDo _ GhciStmtCtxt  (L _ stmts)) = dsDo stmts
 ds_expr _ (HsDo _ MDoExpr       (L _ stmts)) = dsDo stmts
@@ -460,37 +459,11 @@ ds_expr _ (HsMultiIf res_ty alts)
 ds_expr _ (ExplicitList elt_ty wit xs)
   = dsExplicitList elt_ty wit xs
 
--- We desugar [:x1, ..., xn:] as
---   singletonP x1 +:+ ... +:+ singletonP xn
---
-ds_expr _ (ExplicitPArr  ty []) = do
-    emptyP <- dsDPHBuiltin emptyPVar
-    return (Var emptyP `App` Type ty)
-ds_expr _ (ExplicitPArr ty xs) = do
-    singletonP <- dsDPHBuiltin singletonPVar
-    appP       <- dsDPHBuiltin appPVar
-    xs'        <- mapM dsLExprNoLP xs
-    let unary  fn x   = mkApps (Var fn) [Type ty, x]
-        binary fn x y = mkApps (Var fn) [Type ty, x, y]
-
-    return . foldr1 (binary appP) $ map (unary singletonP) xs'
-
 ds_expr _ (ArithSeq expr witness seq)
   = case witness of
      Nothing -> dsArithSeq expr seq
      Just fl -> do { newArithSeq <- dsArithSeq expr seq
                    ; dsSyntaxExpr fl [newArithSeq] }
-
-ds_expr _ (PArrSeq expr (FromTo from to))
-  = mkApps <$> dsExpr expr <*> mapM dsLExprNoLP [from, to]
-
-ds_expr _ (PArrSeq expr (FromThenTo from thn to))
-  = mkApps <$> dsExpr expr <*> mapM dsLExprNoLP [from, thn, to]
-
-ds_expr _ (PArrSeq _ _)
-  = panic "DsExpr.dsExpr: Infinite parallel array!"
-    -- the parser shouldn't have generated it and the renamer and typechecker
-    -- shouldn't have let it through
 
 {-
 Static Pointers
@@ -663,12 +636,18 @@ ds_expr _ expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = fields
     mk_alt upd_fld_env con
       = do { let (univ_tvs, ex_tvs, eq_spec,
                   prov_theta, _req_theta, arg_tys, _) = conLikeFullSig con
-                 subst = zipTvSubst univ_tvs in_inst_tys
+                 user_tvs =
+                   case con of
+                     RealDataCon data_con -> dataConUserTyVars data_con
+                     PatSynCon _          -> univ_tvs ++ ex_tvs
+                       -- The order here is because of the order in `TcPatSyn`.
+                 in_subst  = zipTvSubst univ_tvs in_inst_tys
+                 out_subst = zipTvSubst univ_tvs out_inst_tys
 
                 -- I'm not bothering to clone the ex_tvs
-           ; eqs_vars   <- mapM newPredVarDs (substTheta subst (eqSpecPreds eq_spec))
-           ; theta_vars <- mapM newPredVarDs (substTheta subst prov_theta)
-           ; arg_ids    <- newSysLocalsDs (substTysUnchecked subst arg_tys)
+           ; eqs_vars   <- mapM newPredVarDs (substTheta in_subst (eqSpecPreds eq_spec))
+           ; theta_vars <- mapM newPredVarDs (substTheta in_subst prov_theta)
+           ; arg_ids    <- newSysLocalsDs (substTysUnchecked in_subst arg_tys)
            ; let field_labels = conLikeFieldLabels con
                  val_args = zipWithEqual "dsExpr:RecordUpd" mk_val_arg
                                          field_labels arg_ids
@@ -677,14 +656,17 @@ ds_expr _ expr@(RecordUpd { rupd_expr = record_expr, rupd_flds = fields
 
                  inst_con = noLoc $ mkHsWrap wrap (HsConLikeOut noExt con)
                         -- Reconstruct with the WrapId so that unpacking happens
-                 -- The order here is because of the order in `TcPatSyn`.
                  wrap = mkWpEvVarApps theta_vars                                <.>
                         dict_req_wrap                                           <.>
-                        mkWpTyApps    (mkTyVarTys ex_tvs)                       <.>
-                        mkWpTyApps    [ ty
-                                      | (tv, ty) <- univ_tvs `zip` out_inst_tys
+                        mkWpTyApps    [ lookupTyVar out_subst tv
+                                          `orElse` mkTyVarTy tv
+                                      | tv <- user_tvs
                                       , not (tv `elemVarEnv` wrap_subst) ]
-                 rhs = foldl (\a b -> nlHsApp a b) inst_con val_args
+                          -- Be sure to use user_tvs (which may be ordered
+                          -- differently than `univ_tvs ++ ex_tvs) above.
+                          -- See Note [DataCon user type variable binders]
+                          -- in DataCon.
+                 rhs = foldl' (\a b -> nlHsApp a b) inst_con val_args
 
                         -- Tediously wrap the application in a cast
                         -- Note [Update for GADTs]
@@ -928,7 +910,7 @@ dsDo stmts
       = do  { body     <- goL stmts
             ; rhs'     <- dsLExpr rhs
             ; var   <- selectSimpleMatchVarL pat
-            ; match <- matchSinglePat (Var var) (StmtCtxt DoExpr) pat
+            ; match <- matchSinglePatVar var (StmtCtxt DoExpr) pat
                                       res1_ty (cantFailMatchResult body)
             ; match_code <- handle_failure pat match fail_op
             ; dsSyntaxExpr bind_op [rhs', Lam var match_code] }

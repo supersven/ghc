@@ -79,7 +79,7 @@ data PatSyn
 
         -- Result type
         psResultTy   :: Type,  -- Mentions only psUnivTyVars
-                                -- See Note [Pattern synonym result type]
+                               -- See Note [Pattern synonym result type]
 
         -- See Note [Matchers and builders for pattern synonyms]
         psMatcher     :: (Id, Bool),
@@ -162,7 +162,7 @@ type (T [a] Bool).  For example, this is ill-typed
    f :: T p q -> String
    f (P x) = "urk"
 
-This is differnet to the situation with GADTs:
+This is different to the situation with GADTs:
 
    data S a where
      MkS :: Int -> S Bool
@@ -339,10 +339,10 @@ instance Data.Data PatSyn where
 -- | Build a new pattern synonym
 mkPatSyn :: Name
          -> Bool                 -- ^ Is the pattern synonym declared infix?
-         -> ([TyVarBinder], ThetaType) -- ^ Universially-quantified type variables
-                                 --   and required dicts
-         -> ([TyVarBinder], ThetaType) -- ^ Existentially-quantified type variables
-                                 --   and provided dicts
+         -> ([TyVarBinder], ThetaType) -- ^ Universially-quantified type
+                                       -- variables and required dicts
+         -> ([TyVarBinder], ThetaType) -- ^ Existentially-quantified type
+                                       -- variables and provided dicts
          -> [Type]               -- ^ Original arguments
          -> Type                 -- ^ Original result type
          -> (Id, Bool)           -- ^ Name of matcher

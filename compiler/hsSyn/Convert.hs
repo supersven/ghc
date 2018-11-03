@@ -17,7 +17,7 @@ module Convert( convertToHsExpr, convertToPat, convertToHsDecls,
 import GhcPrelude
 
 import HsSyn as Hs
-import qualified Class
+import PrelNames
 import RdrName
 import qualified Name
 import Module
@@ -28,7 +28,6 @@ import SrcLoc
 import Type
 import qualified Coercion ( Role(..) )
 import TysWiredIn
-import TysPrim (eqPrimTyCon)
 import BasicTypes as Hs
 import ForeignCall
 import Unique
@@ -258,7 +257,7 @@ cvtDec (ClassD ctxt cl tvs fds decs)
     cvt_at_def :: LTyFamInstDecl GhcPs -> CvtM (LTyFamDefltEqn GhcPs)
     -- Very similar to what happens in RdrHsSyn.mkClassDecl
     cvt_at_def decl = case RdrHsSyn.mkATDefault decl of
-                        Right def     -> return def
+                        Right (def, _) -> return def
                         Left (_, msg) -> failWith msg
 
 cvtDec (InstanceD o ctxt ty decs)
@@ -295,8 +294,8 @@ cvtDec (DataFamilyD tc tvs kind)
        ; returnJustL $ TyClD noExt $ FamDecl noExt $
          FamilyDecl noExt DataFamily tc' tvs' Prefix result Nothing }
 
-cvtDec (DataInstD ctxt tc tys ksig constrs derivs)
-  = do { (ctxt', tc', typats') <- cvt_tyinst_hdr ctxt tc tys
+cvtDec (DataInstD ctxt tc bndrs tys ksig constrs derivs)
+  = do { (ctxt', tc', bndrs', typats') <- cvt_tyinst_hdr ctxt tc bndrs tys
        ; ksig' <- cvtKind `traverse` ksig
        ; cons' <- mapM cvtConstr constrs
        ; derivs' <- cvtDerivs derivs
@@ -310,12 +309,14 @@ cvtDec (DataInstD ctxt tc tys ksig constrs derivs)
            { dfid_ext = noExt
            , dfid_inst = DataFamInstDecl { dfid_eqn = mkHsImplicitBndrs $
                            FamEqn { feqn_ext = noExt
-                                  , feqn_tycon = tc', feqn_pats = typats'
+                                  , feqn_tycon = tc'
+                                  , feqn_bndrs = bndrs'
+                                  , feqn_pats = typats'
                                   , feqn_rhs = defn
                                   , feqn_fixity = Prefix } }}}
 
-cvtDec (NewtypeInstD ctxt tc tys ksig constr derivs)
-  = do { (ctxt', tc', typats') <- cvt_tyinst_hdr ctxt tc tys
+cvtDec (NewtypeInstD ctxt tc bndrs tys ksig constr derivs)
+  = do { (ctxt', tc', bndrs', typats') <- cvt_tyinst_hdr ctxt tc bndrs tys
        ; ksig' <- cvtKind `traverse` ksig
        ; con' <- cvtConstr constr
        ; derivs' <- cvtDerivs derivs
@@ -328,7 +329,9 @@ cvtDec (NewtypeInstD ctxt tc tys ksig constr derivs)
            { dfid_ext = noExt
            , dfid_inst = DataFamInstDecl { dfid_eqn = mkHsImplicitBndrs $
                            FamEqn { feqn_ext = noExt
-                                  , feqn_tycon = tc', feqn_pats = typats'
+                                  , feqn_tycon = tc'
+                                  , feqn_bndrs = bndrs'
+                                  , feqn_pats = typats'
                                   , feqn_rhs = defn
                                   , feqn_fixity = Prefix } }}}
 
@@ -359,11 +362,12 @@ cvtDec (TH.RoleAnnotD tc roles)
 
 cvtDec (TH.StandaloneDerivD ds cxt ty)
   = do { cxt' <- cvtContext cxt
+       ; ds'  <- traverse cvtDerivStrategy ds
        ; L loc ty'  <- cvtType ty
        ; let inst_ty' = mkHsQualTy cxt loc cxt' $ L loc ty'
        ; returnJustL $ DerivD noExt $
          DerivDecl { deriv_ext =noExt
-                   , deriv_strategy = fmap (L loc . cvtDerivStrategy) ds
+                   , deriv_strategy = ds'
                    , deriv_type = mkLHsSigWcType inst_ty'
                    , deriv_overlap_mode = Nothing } }
 
@@ -399,14 +403,22 @@ cvtDec (TH.PatSynSigD nm ty)
        ; ty' <- cvtPatSynSigTy ty
        ; returnJustL $ Hs.SigD noExt $ PatSynSig noExt [nm'] (mkLHsSigType ty')}
 
+-- Implicit parameter bindings are handled in cvtLocalDecs and
+-- cvtImplicitParamBind. They are not allowed in any other scope, so
+-- reaching this case indicates an error.
+cvtDec (TH.ImplicitParamBindD _ _)
+  = failWith (text "Implicit parameter binding only allowed in let or where")
+
 ----------------
 cvtTySynEqn :: Located RdrName -> TySynEqn -> CvtM (LTyFamInstEqn GhcPs)
-cvtTySynEqn tc (TySynEqn lhs rhs)
-  = do  { lhs' <- mapM (wrap_apps <=< cvtType) lhs
+cvtTySynEqn tc (TySynEqn mb_bndrs lhs rhs)
+  = do  { mb_bndrs' <- traverse (mapM cvt_tv) mb_bndrs
+        ; lhs' <- mapM (wrap_apps <=< cvtType) lhs
         ; rhs' <- cvtType rhs
         ; returnL $ mkHsImplicitBndrs
                   $ FamEqn { feqn_ext    = noExt
                            , feqn_tycon  = tc
+                           , feqn_bndrs  = mb_bndrs'
                            , feqn_pats   = lhs'
                            , feqn_fixity = Prefix
                            , feqn_rhs    = rhs' } }
@@ -444,15 +456,17 @@ cvt_tycl_hdr cxt tc tvs
        ; return (cxt', tc', tvs')
        }
 
-cvt_tyinst_hdr :: TH.Cxt -> TH.Name -> [TH.Type]
+cvt_tyinst_hdr :: TH.Cxt -> TH.Name -> Maybe [TH.TyVarBndr] -> [TH.Type]
                -> CvtM ( LHsContext GhcPs
                        , Located RdrName
+                       , Maybe [LHsTyVarBndr GhcPs]
                        , HsTyPats GhcPs)
-cvt_tyinst_hdr cxt tc tys
-  = do { cxt' <- cvtContext cxt
-       ; tc'  <- tconNameL tc
-       ; tys' <- mapM (wrap_apps <=< cvtType) tys
-       ; return (cxt', tc', tys') }
+cvt_tyinst_hdr cxt tc bndrs tys
+  = do { cxt'   <- cvtContext cxt
+       ; tc'    <- tconNameL tc
+       ; bndrs' <- traverse (mapM cvt_tv) bndrs
+       ; tys'   <- mapM (wrap_apps <=< cvtType) tys
+       ; return (cxt', tc', bndrs', tys') }
 
 ----------------
 cvt_tyfam_head :: TypeFamilyHead
@@ -496,6 +510,10 @@ is_bind :: LHsDecl GhcPs -> Either (LHsBind GhcPs) (LHsDecl GhcPs)
 is_bind (L loc (Hs.ValD _ bind)) = Left (L loc bind)
 is_bind decl                     = Right decl
 
+is_ip_bind :: TH.Dec -> Either (String, TH.Exp) TH.Dec
+is_ip_bind (TH.ImplicitParamBindD n e) = Left (n, e)
+is_ip_bind decl             = Right decl
+
 mkBadDecMsg :: Outputable a => MsgDoc -> [a] -> MsgDoc
 mkBadDecMsg doc bads
   = sep [ text "Illegal declaration(s) in" <+> doc <> colon
@@ -534,14 +552,14 @@ cvtConstr (ForallC tvs ctxt con)
     add_cxt (L loc cxt1) (Just (L _ cxt2)) = Just (L loc (cxt1 ++ cxt2))
 
     add_forall tvs' cxt' con@(ConDeclGADT { con_qvars = qvars, con_mb_cxt = cxt })
-      = con { con_forall = not (null all_tvs)
+      = con { con_forall = noLoc $ not (null all_tvs)
             , con_qvars  = mkHsQTvs all_tvs
             , con_mb_cxt = add_cxt cxt' cxt }
       where
         all_tvs = hsQTvExplicit tvs' ++ hsQTvExplicit qvars
 
     add_forall tvs' cxt' con@(ConDeclH98 { con_ex_tvs = ex_tvs, con_mb_cxt = cxt })
-      = con { con_forall = not (null all_tvs)
+      = con { con_forall = noLoc $ not (null all_tvs)
             , con_ex_tvs = all_tvs
             , con_mb_cxt = add_cxt cxt' cxt }
       where
@@ -554,7 +572,7 @@ cvtConstr (GadtC c strtys ty)
         ; args    <- mapM cvt_arg strtys
         ; L _ ty' <- cvtType ty
         ; c_ty    <- mk_arr_apps args ty'
-        ; returnL $ mkGadtDecl c' c_ty}
+        ; returnL $ fst $ mkGadtDecl c' c_ty}
 
 cvtConstr (RecGadtC c varstrtys ty)
   = do  { c'       <- mapM cNameL c
@@ -562,7 +580,7 @@ cvtConstr (RecGadtC c varstrtys ty)
         ; rec_flds <- mapM cvt_id_arg varstrtys
         ; let rec_ty = noLoc (HsFunTy noExt
                                            (noLoc $ HsRecTy noExt rec_flds) ty')
-        ; returnL $ mkGadtDecl c' rec_ty }
+        ; returnL $ fst $ mkGadtDecl c' rec_ty }
 
 cvtSrcUnpackedness :: TH.SourceUnpackedness -> SrcUnpackedness
 cvtSrcUnpackedness NoSourceUnpackedness = NoSrcUnpack
@@ -597,7 +615,7 @@ cvtDerivs :: [TH.DerivClause] -> CvtM (HsDeriving GhcPs)
 cvtDerivs cs = do { cs' <- mapM cvtDerivClause cs
                   ; returnL cs' }
 
-cvt_fundep :: FunDep -> CvtM (Located (Class.FunDep (Located RdrName)))
+cvt_fundep :: FunDep -> CvtM (LHsFunDep GhcPs)
 cvt_fundep (FunDep xs ys) = do { xs' <- mapM tNameL xs
                                ; ys' <- mapM tNameL ys
                                ; returnL (xs', ys') }
@@ -697,17 +715,26 @@ cvtPragmaD (SpecialiseInstP ty)
        ; returnJustL $ Hs.SigD noExt $
          SpecInstSig noExt (SourceText "{-# SPECIALISE") (mkLHsSigType ty') }
 
-cvtPragmaD (RuleP nm bndrs lhs rhs phases)
+cvtPragmaD (RuleP nm ty_bndrs tm_bndrs lhs rhs phases)
   = do { let nm' = mkFastString nm
        ; let act = cvtPhases phases AlwaysActive
-       ; bndrs' <- mapM cvtRuleBndr bndrs
+       ; ty_bndrs' <- traverse (mapM cvt_tv) ty_bndrs
+       ; tm_bndrs' <- mapM cvtRuleBndr tm_bndrs
        ; lhs'   <- cvtl lhs
        ; rhs'   <- cvtl rhs
        ; returnJustL $ Hs.RuleD noExt
-            $ HsRules noExt (SourceText "{-# RULES")
-                      [noLoc $ HsRule noExt (noLoc (SourceText nm,nm')) act
-                                                  bndrs' lhs' rhs']
-       }
+            $ HsRules { rds_ext = noExt
+                      , rds_src = SourceText "{-# RULES"
+                      , rds_rules = [noLoc $
+                          HsRule { rd_ext  = noExt
+                                 , rd_name = (noLoc (quotedSourceText nm,nm'))
+                                 , rd_act  = act
+                                 , rd_tyvs = ty_bndrs'
+                                 , rd_tmvs = tm_bndrs'
+                                 , rd_lhs  = lhs'
+                                 , rd_rhs  = rhs' }] }
+
+          }
 
 cvtPragmaD (AnnP target exp)
   = do { exp' <- cvtl exp
@@ -766,24 +793,34 @@ cvtRuleBndr (TypedRuleVar n ty)
 
 cvtLocalDecs :: MsgDoc -> [TH.Dec] -> CvtM (HsLocalBinds GhcPs)
 cvtLocalDecs doc ds
-  | null ds
-  = return (EmptyLocalBinds noExt)
-  | otherwise
-  = do { ds' <- cvtDecs ds
-       ; let (binds, prob_sigs) = partitionWith is_bind ds'
-       ; let (sigs, bads) = partitionWith is_sig prob_sigs
-       ; unless (null bads) (failWith (mkBadDecMsg doc bads))
-       ; return (HsValBinds noExt (ValBinds noExt (listToBag binds) sigs)) }
+  = case partitionWith is_ip_bind ds of
+      ([], []) -> return (EmptyLocalBinds noExt)
+      ([], _) -> do
+        ds' <- cvtDecs ds
+        let (binds, prob_sigs) = partitionWith is_bind ds'
+        let (sigs, bads) = partitionWith is_sig prob_sigs
+        unless (null bads) (failWith (mkBadDecMsg doc bads))
+        return (HsValBinds noExt (ValBinds noExt (listToBag binds) sigs))
+      (ip_binds, []) -> do
+        binds <- mapM (uncurry cvtImplicitParamBind) ip_binds
+        return (HsIPBinds noExt (IPBinds noExt binds))
+      ((_:_), (_:_)) ->
+        failWith (text "Implicit parameters mixed with other bindings")
 
 cvtClause :: HsMatchContext RdrName
           -> TH.Clause -> CvtM (Hs.LMatch GhcPs (LHsExpr GhcPs))
 cvtClause ctxt (Clause ps body wheres)
   = do  { ps' <- cvtPats ps
-        ; pps <- mapM wrap_conpat ps'
+        ; let pps = map (parenthesizePat appPrec) ps'
         ; g'  <- cvtGuard body
         ; ds' <- cvtLocalDecs (text "a where clause") wheres
         ; returnL $ Hs.Match noExt ctxt pps (GRHSs noExt g' (noLoc ds')) }
 
+cvtImplicitParamBind :: String -> TH.Exp -> CvtM (LIPBind GhcPs)
+cvtImplicitParamBind n e = do
+    n' <- wrapL (ipName n)
+    e' <- cvtl e
+    returnL (IPBind noExt (Left n') e')
 
 -------------------------------------------------------------------
 --              Expressions
@@ -795,8 +832,10 @@ cvtl e = wrapL (cvt e)
     cvt (VarE s)        = do { s' <- vName s; return $ HsVar noExt (noLoc s') }
     cvt (ConE s)        = do { s' <- cName s; return $ HsVar noExt (noLoc s') }
     cvt (LitE l)
-      | overloadedLit l = go cvtOverLit (HsOverLit noExt) isCompoundHsOverLit
-      | otherwise       = go cvtLit     (HsLit     noExt) isCompoundHsLit
+      | overloadedLit l = go cvtOverLit (HsOverLit noExt)
+                             (hsOverLitNeedsParens appPrec)
+      | otherwise       = go cvtLit (HsLit noExt)
+                             (hsLitNeedsParens appPrec)
       where
         go :: (Lit -> CvtM (l GhcPs))
            -> (l GhcPs -> HsExpr GhcPs)
@@ -815,17 +854,18 @@ cvtl e = wrapL (cvt e)
     cvt (AppTypeE e t) = do { e' <- cvtl e
                             ; t' <- cvtType t
                             ; tp <- wrap_apps t'
-                            ; return $ HsAppType (mkHsWildCardBndrs tp) e' }
+                            ; let tp' = parenthesizeHsType appPrec tp
+                            ; return $ HsAppType noExt e' (mkHsWildCardBndrs tp') }
     cvt (LamE [] e)    = cvt e -- Degenerate case. We convert the body as its
                                -- own expression to avoid pretty-printing
                                -- oddities that can result from zero-argument
                                -- lambda expressions. See #13856.
     cvt (LamE ps e)    = do { ps' <- cvtPats ps; e' <- cvtl e
-                            ; let pats = map parenthesizeCompoundPat ps'
+                            ; let pats = map (parenthesizePat appPrec) ps'
                             ; return $ HsLam noExt (mkMatchGroup FromSource
                                              [mkSimpleMatch LambdaExpr
                                              pats e'])}
-    cvt (LamCaseE ms)  = do { ms' <- mapM (cvtMatch LambdaExpr) ms
+    cvt (LamCaseE ms)  = do { ms' <- mapM (cvtMatch CaseAlt) ms
                             ; return $ HsLamCase noExt
                                                    (mkMatchGroup FromSource ms')
                             }
@@ -856,6 +896,7 @@ cvtl e = wrapL (cvt e)
                             ; return $ HsCase noExt e'
                                                  (mkMatchGroup FromSource ms') }
     cvt (DoE ss)       = cvtHsDo DoExpr ss
+    cvt (MDoE ss)      = cvtHsDo MDoExpr ss
     cvt (CompE ss)     = cvtHsDo ListComp ss
     cvt (ArithSeqE dd) = do { dd' <- cvtDD dd
                             ; return $ ArithSeq noExt Nothing dd' }
@@ -869,9 +910,10 @@ cvtl e = wrapL (cvt e)
 
     -- Infix expressions
     cvt (InfixE (Just x) s (Just y)) = do { x' <- cvtl x; s' <- cvtl s; y' <- cvtl y
+                                          ; let px = parenthesizeHsExpr opPrec x'
+                                                py = parenthesizeHsExpr opPrec y'
                                           ; wrapParL (HsPar noExt) $
-                                            OpApp noExt (mkLHsPar x') s'
-                                                        (mkLHsPar y') }
+                                            OpApp noExt px s' py }
                                             -- Parenthesise both arguments and result,
                                             -- to ensure this operator application does
                                             -- does not get re-associated
@@ -897,7 +939,8 @@ cvtl e = wrapL (cvt e)
 
     cvt (ParensE e)      = do { e' <- cvtl e; return $ HsPar noExt e' }
     cvt (SigE e t)       = do { e' <- cvtl e; t' <- cvtType t
-                              ; return $ ExprWithTySig (mkLHsSigWcType t') e' }
+                              ; let pe = parenthesizeHsExpr sigPrec e'
+                              ; return $ ExprWithTySig noExt pe (mkLHsSigWcType t') }
     cvt (RecConE c flds) = do { c' <- cNameL c
                               ; flds' <- mapM (cvtFld (mkFieldOcc . noLoc)) flds
                               ; return $ mkRdrRecordCon c' (HsRecFields flds' Nothing) }
@@ -907,8 +950,13 @@ cvtl e = wrapL (cvt e)
                                            flds
                               ; return $ mkRdrRecordUpd e' flds' }
     cvt (StaticE e)      = fmap (HsStatic noExt) $ cvtl e
-    cvt (UnboundVarE s)  = do { s' <- vName s; return $ HsVar noExt (noLoc s') }
+    cvt (UnboundVarE s)  = do -- Use of 'vcName' here instead of 'vName' is
+                              -- important, because UnboundVarE may contain
+                              -- constructor names - see #14627.
+                              { s' <- vcName s
+                              ; return $ HsVar noExt (noLoc s') }
     cvt (LabelE s)       = do { return $ HsOverLabel noExt Nothing (fsLit s) }
+    cvt (ImplicitParamVarE n) = do { n' <- ipName n; return $ HsIPVar noExt n' }
 
 {- Note [Dropping constructors]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -958,7 +1006,7 @@ the trees to reflect the fixities of the underlying operators:
 This is done by the renamer (see @mkOppAppRn@, @mkConOppPatRn@, and
 @mkHsOpTyRn@ in RnTypes), which expects that the input will be completely
 right-biased for types and left-biased for everything else. So we left-bias the
-trees of @UInfixP@ and @UInfixE@ and use HsAppsTy for UInfixT.
+trees of @UInfixP@ and @UInfixE@ and right-bias the trees of @UInfixT@.
 
 Sample input:
 
@@ -1036,14 +1084,15 @@ cvtStmt (TH.ParS dss)  = do { dss' <- mapM cvt_one dss
   where
     cvt_one ds = do { ds' <- cvtStmts ds
                     ; return (ParStmtBlock noExt ds' undefined noSyntaxExpr) }
+cvtStmt (TH.RecS ss) = do { ss' <- mapM cvtStmt ss; returnL (mkRecStmt ss') }
 
 cvtMatch :: HsMatchContext RdrName
          -> TH.Match -> CvtM (Hs.LMatch GhcPs (LHsExpr GhcPs))
 cvtMatch ctxt (TH.Match p body decs)
   = do  { p' <- cvtPat p
-        ; lp <- case ctxt of
-            CaseAlt -> return p'
-            _       -> wrap_conpat p'
+        ; let lp = case p' of
+                     L loc SigPat{} -> L loc (ParPat NoExt p') -- #14875
+                     _              -> p'
         ; g' <- cvtGuard body
         ; decs' <- cvtLocalDecs (text "a where clause") decs
         ; returnL $ Hs.Match noExt ctxt [lp] (GRHSs noExt g' (noLoc decs')) }
@@ -1144,11 +1193,13 @@ cvtp (UnboxedSumP p alt arity)
                             ; unboxedSumChecks alt arity
                             ; return $ SumPat noExt p' alt arity }
 cvtp (ConP s ps)       = do { s' <- cNameL s; ps' <- cvtPats ps
-                            ; pps <- mapM wrap_conpat ps'
+                            ; let pps = map (parenthesizePat appPrec) ps'
                             ; return $ ConPatIn s' (PrefixCon pps) }
 cvtp (InfixP p1 s p2)  = do { s' <- cNameL s; p1' <- cvtPat p1; p2' <- cvtPat p2
                             ; wrapParL (ParPat noExt) $
-                              ConPatIn s' (InfixCon (mkParPat p1') (mkParPat p2')) }
+                              ConPatIn s' $
+                              InfixCon (parenthesizePat opPrec p1')
+                                       (parenthesizePat opPrec p2') }
                             -- See Note [Operator association]
 cvtp (UInfixP p1 s p2) = do { p1' <- cvtPat p1; cvtOpAppP p1' s p2 } -- Note [Converting UInfix]
 cvtp (ParensP p)       = do { p' <- cvtPat p;
@@ -1167,7 +1218,7 @@ cvtp (ListP ps)        = do { ps' <- cvtPats ps
                             ; return
                                    $ ListPat noExt ps'}
 cvtp (SigP p t)        = do { p' <- cvtPat p; t' <- cvtType t
-                            ; return $ SigPat (mkLHsSigWcType t') p' }
+                            ; return $ SigPat noExt p' (mkLHsSigWcType t') }
 cvtp (ViewP e p)       = do { e' <- cvtl e; p' <- cvtPat p
                             ; return $ ViewPat noExt e' p'}
 
@@ -1178,12 +1229,6 @@ cvtPatFld (s,p)
                                          = L ls $ mkFieldOcc (L ls s')
                                      , hsRecFieldArg = p'
                                      , hsRecPun      = False}) }
-
-wrap_conpat :: Hs.LPat GhcPs -> CvtM (Hs.LPat GhcPs)
-wrap_conpat p@(L _ (ConPatIn _ (InfixCon{})))   = returnL $ ParPat noExt p
-wrap_conpat p@(L _ (ConPatIn _ (PrefixCon []))) = return p
-wrap_conpat p@(L _ (ConPatIn _ (PrefixCon _)))  = returnL $ ParPat noExt p
-wrap_conpat p                                   = return p
 
 {- | @cvtOpAppP x op y@ converts @op@ and @y@ and produces the operator application @x `op` y@.
 The produced tree of infix patterns will be left-biased, provided @x@ is.
@@ -1229,14 +1274,17 @@ cvtPred = cvtType
 cvtDerivClause :: TH.DerivClause
                -> CvtM (LHsDerivingClause GhcPs)
 cvtDerivClause (TH.DerivClause ds ctxt)
-  = do { ctxt'@(L loc _) <- fmap (map mkLHsSigType) <$> cvtContext ctxt
-       ; let ds' = fmap (L loc . cvtDerivStrategy) ds
+  = do { ctxt' <- fmap (map mkLHsSigType) <$> cvtContext ctxt
+       ; ds'   <- traverse cvtDerivStrategy ds
        ; returnL $ HsDerivingClause noExt ds' ctxt' }
 
-cvtDerivStrategy :: TH.DerivStrategy -> Hs.DerivStrategy
-cvtDerivStrategy TH.StockStrategy    = Hs.StockStrategy
-cvtDerivStrategy TH.AnyclassStrategy = Hs.AnyclassStrategy
-cvtDerivStrategy TH.NewtypeStrategy  = Hs.NewtypeStrategy
+cvtDerivStrategy :: TH.DerivStrategy -> CvtM (Hs.LDerivStrategy GhcPs)
+cvtDerivStrategy TH.StockStrategy    = returnL Hs.StockStrategy
+cvtDerivStrategy TH.AnyclassStrategy = returnL Hs.AnyclassStrategy
+cvtDerivStrategy TH.NewtypeStrategy  = returnL Hs.NewtypeStrategy
+cvtDerivStrategy (TH.ViaStrategy ty) = do
+  ty' <- cvtType ty
+  returnL $ Hs.ViaStrategy (mkLHsSigType ty')
 
 cvtType :: TH.Type -> CvtM (LHsType GhcPs)
 cvtType = cvtTypeKind "type"
@@ -1279,7 +1327,9 @@ cvtTypeKind ty_str ty
                  x'' <- case x' of
                           L _ HsFunTy{}    -> returnL (HsParTy noExt x')
                           L _ HsForAllTy{} -> returnL (HsParTy noExt x')
-                                                                       -- #14646
+                                                               -- #14646
+                          L _ HsQualTy{}   -> returnL (HsParTy noExt x')
+                                                               -- #15324
                           _                -> return x'
                  returnL (HsFunTy noExt x'' y')
              | otherwise ->
@@ -1295,16 +1345,24 @@ cvtTypeKind ty_str ty
            VarT nm -> do { nm' <- tNameL nm
                          ; mk_apps (HsTyVar noExt NotPromoted nm') tys' }
            ConT nm -> do { nm' <- tconName nm
-                         ; mk_apps (HsTyVar noExt NotPromoted (noLoc nm')) tys'}
+                         ; -- ConT can contain both data constructor (i.e.,
+                           -- promoted) names and other (i.e, unpromoted)
+                           -- names, as opposed to PromotedT, which can only
+                           -- contain data constructor names. See #15572.
+                           let prom = if isRdrDataCon nm'
+                                      then Promoted
+                                      else NotPromoted
+                         ; mk_apps (HsTyVar noExt prom (noLoc nm')) tys'}
 
            ForallT tvs cxt ty
              | null tys'
              -> do { tvs' <- cvtTvs tvs
                    ; cxt' <- cvtContext cxt
+                   ; let pcxt = parenthesizeHsContext funPrec cxt'
                    ; ty'  <- cvtType ty
                    ; loc <- getL
                    ; let hs_ty  = mkHsForAllTy tvs loc tvs' rho_ty
-                         rho_ty = mkHsQualTy cxt loc cxt' ty'
+                         rho_ty = mkHsQualTy cxt loc pcxt ty'
 
                    ; return hs_ty }
 
@@ -1315,7 +1373,7 @@ cvtTypeKind ty_str ty
                    }
 
            LitT lit
-             -> returnL (HsTyLit noExt (cvtTyLit lit))
+             -> mk_apps (HsTyLit noExt (cvtTyLit lit)) tys'
 
            WildCardT
              -> mk_apps mkAnonWildCardTy tys'
@@ -1324,23 +1382,23 @@ cvtTypeKind ty_str ty
              -> do { s'  <- tconName s
                    ; t1' <- cvtType t1
                    ; t2' <- cvtType t2
-                   ; mk_apps (HsTyVar noExt NotPromoted (noLoc s')) [t1', t2']
+                   ; mk_apps (HsTyVar noExt NotPromoted (noLoc s'))
+                             (t1' : t2' : tys')
                    }
 
            UInfixT t1 s t2
-             -> do { t1' <- cvtType t1
-                   ; t2' <- cvtType t2
-                   ; s'  <- tconName s
-                   ; return $ cvtOpAppT t1' s' t2'
-                   } -- Note [Converting UInfix]
+             -> do { t2' <- cvtType t2
+                   ; t <- cvtOpAppT t1 s t2' -- Note [Converting UInfix]
+                   ; mk_apps (unLoc t) tys'
+                   }
 
            ParensT t
              -> do { t' <- cvtType t
-                   ; returnL $ HsParTy noExt t'
+                   ; mk_apps (HsParTy noExt t') tys'
                    }
 
            PromotedT nm -> do { nm' <- cName nm
-                              ; mk_apps (HsTyVar noExt NotPromoted
+                              ; mk_apps (HsTyVar noExt Promoted
                                                              (noLoc nm')) tys' }
                  -- Promoted data constructor; hence cName
 
@@ -1350,36 +1408,50 @@ cvtTypeKind ty_str ty
              | m == n   -- Saturated
              -> returnL (HsExplicitTupleTy noExt tys')
              | otherwise
-             -> mk_apps (HsTyVar noExt NotPromoted
+             -> mk_apps (HsTyVar noExt Promoted
                                (noLoc (getRdrName (tupleDataCon Boxed n)))) tys'
              where
                m = length tys'
 
            PromotedNilT
-             -> returnL (HsExplicitListTy noExt Promoted [])
+             -> mk_apps (HsExplicitListTy noExt Promoted []) tys'
 
            PromotedConsT  -- See Note [Representing concrete syntax in types]
                           -- in Language.Haskell.TH.Syntax
              | [ty1, L _ (HsExplicitListTy _ ip tys2)] <- tys'
              -> returnL (HsExplicitListTy noExt ip (ty1:tys2))
              | otherwise
-             -> mk_apps (HsTyVar noExt NotPromoted
+             -> mk_apps (HsTyVar noExt Promoted
                          (noLoc (getRdrName consDataCon)))
                         tys'
 
            StarT
-             -> returnL (HsTyVar noExt NotPromoted (noLoc
-                                              (getRdrName liftedTypeKindTyCon)))
+             -> mk_apps (HsTyVar noExt NotPromoted
+                              (noLoc (getRdrName liftedTypeKindTyCon)))
+                        tys'
 
            ConstraintT
-             -> returnL (HsTyVar noExt NotPromoted
+             -> mk_apps (HsTyVar noExt NotPromoted
                               (noLoc (getRdrName constraintKindTyCon)))
+                        tys'
 
            EqualityT
-             | [x',y'] <- tys' -> returnL (HsEqTy noExt x' y')
+             | [x',y'] <- tys' ->
+                   let px = parenthesizeHsType opPrec x'
+                       py = parenthesizeHsType opPrec y'
+                   in returnL (HsOpTy noExt px (noLoc eqTyCon_RDR) py)
+               -- The long-term goal is to remove the above case entirely and
+               -- subsume it under the case for InfixT. See #15815, comment:6,
+               -- for more details.
+
              | otherwise ->
                    mk_apps (HsTyVar noExt NotPromoted
-                            (noLoc (getRdrName eqPrimTyCon))) tys'
+                            (noLoc eqTyCon_RDR)) tys'
+           ImplicitParamT n t
+             -> do { n' <- wrapL $ ipName n
+                   ; t' <- cvtType t
+                   ; returnL (HsIParamTy noExt n' t')
+                   }
 
            _ -> failWith (ptext (sLit ("Malformed " ++ ty_str)) <+> text (show ty))
     }
@@ -1393,9 +1465,9 @@ mk_apps head_ty (ty:tys) =
      ; mk_apps (HsAppTy noExt head_ty' p_ty) tys }
   where
     -- See Note [Adding parens for splices]
-    add_parens t
-      | isCompoundHsType t = returnL (HsParTy noExt t)
-      | otherwise          = return t
+    add_parens lt@(L _ t)
+      | hsTypeNeedsParens appPrec t = returnL (HsParTy noExt lt)
+      | otherwise                   = return lt
 
 wrap_apps  :: LHsType GhcPs -> CvtM (LHsType GhcPs)
 wrap_apps t@(L _ HsAppTy {}) = returnL (HsParTy noExt t)
@@ -1441,23 +1513,20 @@ cvtTyLit :: TH.TyLit -> HsTyLit
 cvtTyLit (TH.NumTyLit i) = HsNumTy NoSourceText i
 cvtTyLit (TH.StrTyLit s) = HsStrTy NoSourceText (fsLit s)
 
-{- | @cvtOpAppT x op y@ takes converted arguments and flattens any HsAppsTy
-   structure in them.
--}
-cvtOpAppT :: LHsType GhcPs -> RdrName -> LHsType GhcPs -> LHsType GhcPs
-cvtOpAppT t1@(L loc1 _) op t2@(L loc2 _)
-  = L (combineSrcSpans loc1 loc2) $
-    HsAppsTy noExt (t1' ++ [noLoc $ HsAppInfix noExt (noLoc op)] ++ t2')
-  where
-    t1' | L _ (HsAppsTy _ t1s) <- t1
-        = t1s
-        | otherwise
-        = [noLoc $ HsAppPrefix noExt t1]
+{- | @cvtOpAppT x op y@ converts @op@ and @y@ and produces the operator
+application @x `op` y@. The produced tree of infix types will be right-biased,
+provided @y@ is.
 
-    t2' | L _ (HsAppsTy _ t2s) <- t2
-        = t2s
-        | otherwise
-        = [noLoc $ HsAppPrefix noExt t2]
+See the @cvtOpApp@ documentation for how this function works.
+-}
+cvtOpAppT :: TH.Type -> TH.Name -> LHsType GhcPs -> CvtM (LHsType GhcPs)
+cvtOpAppT (UInfixT x op2 y) op1 z
+  = do { l <- cvtOpAppT y op1 z
+       ; cvtOpAppT x op2 l }
+cvtOpAppT x op y
+  = do { op' <- tconNameL op
+       ; x' <- cvtType x
+       ; returnL (mkHsOpTy x' op' y) }
 
 cvtKind :: TH.Kind -> CvtM (LHsKind GhcPs)
 cvtKind = cvtTypeKind "kind"
@@ -1618,6 +1687,11 @@ tName n = cvtName OccName.tvName n
 -- Type Constructor names
 tconNameL n = wrapL (tconName n)
 tconName n = cvtName OccName.tcClsName n
+
+ipName :: String -> CvtM HsIPName
+ipName n
+  = do { unless (okVarOcc n) (failWith (badOcc OccName.varName n))
+       ; return (HsIPName (fsLit n)) }
 
 cvtName :: OccName.NameSpace -> TH.Name -> CvtM RdrName
 cvtName ctxt_ns (TH.Name occ flavour)

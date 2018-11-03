@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, NamedFieldPuns, NondecreasingIndentation #-}
+{-# LANGUAGE CPP, NamedFieldPuns, NondecreasingIndentation, BangPatterns #-}
 {-# OPTIONS_GHC -fno-cse #-}
 -- -fno-cse is needed for GLOBAL_VAR's to behave properly
 
@@ -263,11 +263,10 @@ compileOne' m_tc_result mHscMessage
        -- imports a _stub.h file that we created here.
        current_dir = takeDirectory basename
        old_paths   = includePaths dflags1
-       prevailing_dflags = hsc_dflags hsc_env0
+       !prevailing_dflags = hsc_dflags hsc_env0
        dflags =
           dflags1 { includePaths = addQuoteInclude old_paths [current_dir]
-                  , log_action = log_action prevailing_dflags
-                  , log_finaliser = log_finaliser prevailing_dflags }
+                  , log_action = log_action prevailing_dflags }
                   -- use the prevailing log_action / log_finaliser,
                   -- not the one cached in the summary.  This is so
                   -- that we can change the log_action without having
@@ -763,6 +762,7 @@ getOutputFilename stop_phase output basename dflags next_phase maybe_location
           odir       = objectDir dflags
           osuf       = objectSuf dflags
           keep_hc    = gopt Opt_KeepHcFiles dflags
+          keep_hscpp = gopt Opt_KeepHscppFiles dflags
           keep_s     = gopt Opt_KeepSFiles dflags
           keep_bc    = gopt Opt_KeepLlvmFiles dflags
 
@@ -779,6 +779,7 @@ getOutputFilename stop_phase output basename dflags next_phase maybe_location
                        As _    | keep_s     -> True
                        LlvmOpt | keep_bc    -> True
                        HCc     | keep_hc    -> True
+                       HsPp _  | keep_hscpp -> True   -- See Trac #10869
                        _other               -> False
 
           suffix = myPhaseInputExt next_phase
@@ -1475,10 +1476,12 @@ runPhase (RealPhase LlvmOpt) input_fn dflags
   where
         -- we always (unless -optlo specified) run Opt since we rely on it to
         -- fix up some pretty big deficiencies in the code we generate
-        llvmOpts = case optLevel dflags of
-          0 -> "-mem2reg -globalopt"
-          1 -> "-O1 -globalopt"
-          _ -> "-O2"
+        optIdx = max 0 $ min 2 $ optLevel dflags  -- ensure we're in [0,2]
+        llvmOpts = case lookup optIdx $ llvmPasses dflags of
+                    Just passes -> passes
+                    Nothing -> panic ("runPhase LlvmOpt: llvm-passes file "
+                                      ++ "is missing passes for level "
+                                      ++ show optIdx)
 
         -- don't specify anything if user has specified commands. We do this
         -- for opt but not llc since opt is very specifically for optimisation
@@ -1743,6 +1746,16 @@ linkBinary' staticLink dflags o_files dep_packages = do
               in ["-L" ++ l] ++ ["-Xlinker", "-rpath", "-Xlinker", libpath]
          | otherwise = ["-L" ++ l]
 
+    pkg_lib_path_opts <-
+      if gopt Opt_SingleLibFolder dflags
+      then do
+        libs <- getLibs dflags dep_packages
+        tmpDir <- newTempDir dflags
+        sequence_ [ copyFile lib (tmpDir </> basename)
+                  | (lib, basename) <- libs]
+        return [ "-L" ++ tmpDir ]
+      else pure pkg_lib_path_opts
+
     let
       dead_strip
         | gopt Opt_WholeArchiveHsLibs dflags = []
@@ -1883,6 +1896,9 @@ linkBinary' staticLink dflags o_files dep_packages = do
                       ++ pkg_framework_opts
                       ++ debug_opts
                       ++ thread_opts
+                      ++ (if platformOS platform == OSDarwin
+                          then [ "-Wl,-dead_strip_dylibs" ]
+                          else [])
                     ))
 
 exeFileName :: Bool -> DynFlags -> FilePath

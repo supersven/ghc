@@ -155,7 +155,7 @@ traverseWeakPtrList(void)
 
       // otherwise, fall through...
   }
-  /* fallthrough */
+  FALLTHROUGH;
 
   case WeakPtrs:
   {
@@ -344,7 +344,7 @@ static void tidyThreadList (generation *gen)
 
         if (tmp == NULL) {
             // not alive (yet): leave this thread on the
-            // old_all_threads list.
+            // old_threads list.
             prev = &(t->global_link);
         }
         else {

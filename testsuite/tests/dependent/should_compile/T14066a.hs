@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies, TypeInType, ExplicitForAll, GADTs,
+{-# LANGUAGE TypeFamilies, DataKinds, PolyKinds, ExplicitForAll, GADTs,
              UndecidableInstances, RankNTypes, ScopedTypeVariables #-}
 
 module T14066a where
@@ -10,7 +10,7 @@ import Data.Type.Bool
 
 type family Bar x y where
   Bar (x :: a) (y :: b) = Int
-  Bar (x :: c) (y :: d) = Bool   -- a,b,c,d should be SigTvs and unify appropriately
+  Bar (x :: c) (y :: d) = Bool   -- a,b,c,d should be TyVarTvs and unify appropriately
 
 
   -- the two k's, even though they have different scopes, should unify in the

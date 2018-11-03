@@ -62,9 +62,9 @@ Here's the externally-callable interface:
 occurAnalysePgm :: Module         -- Used only in debug output
                 -> (Id -> Bool)         -- Active unfoldings
                 -> (Activation -> Bool) -- Active rules
-                -> [CoreRule] -> [CoreVect] -> VarSet
+                -> [CoreRule]
                 -> CoreProgram -> CoreProgram
-occurAnalysePgm this_mod active_unf active_rule imp_rules vects vectVars binds
+occurAnalysePgm this_mod active_unf active_rule imp_rules binds
   | isEmptyDetails final_usage
   = occ_anald_binds
 
@@ -86,12 +86,8 @@ occurAnalysePgm this_mod active_unf active_rule imp_rules vects vectVars binds
           -- we can easily create an infinite loop (Trac #9583 is an example)
 
     initial_uds = addManyOccsSet emptyDetails
-                            (rulesFreeVars imp_rules `unionVarSet`
-                             vectsFreeVars vects `unionVarSet`
-                             vectVars)
-    -- The RULES and VECTORISE declarations keep things alive! (For VECTORISE declarations,
-    -- we only get them *until* the vectoriser runs. Afterwards, these dependencies are
-    -- reflected in 'vectors' — see Note [Vectorisation declarations and occurrences].)
+                            (rulesFreeVars imp_rules)
+    -- The RULES declarations keep things alive!
 
     -- Note [Preventing loops due to imported functions rules]
     imp_rule_edges = foldr (plusVarEnv_C unionVarSet) emptyVarEnv
@@ -1776,29 +1772,12 @@ occAnal env (Case scrut bndr ty alts)
     case mapAndUnzip occ_anal_alt alts of { (alts_usage_s, alts')   ->
     let
         alts_usage  = foldr orUDs emptyDetails alts_usage_s
-        (alts_usage1, tagged_bndr) = tag_case_bndr alts_usage bndr
+        (alts_usage1, tagged_bndr) = tagLamBinder alts_usage bndr
         total_usage = markAllNonTailCalled scrut_usage `andUDs` alts_usage1
                         -- Alts can have tail calls, but the scrutinee can't
     in
     total_usage `seq` (total_usage, Case scrut' tagged_bndr ty alts') }}
   where
-        -- Note [Case binder usage]
-        -- ~~~~~~~~~~~~~~~~~~~~~~~~
-        -- The case binder gets a usage of either "many" or "dead", never "one".
-        -- Reason: we like to inline single occurrences, to eliminate a binding,
-        -- but inlining a case binder *doesn't* eliminate a binding.
-        -- We *don't* want to transform
-        --      case x of w { (p,q) -> f w }
-        -- into
-        --      case x of w { (p,q) -> f (p,q) }
-    tag_case_bndr usage bndr
-      = (usage', setIdOccInfo bndr final_occ_info)
-      where
-        occ_info       = lookupDetails usage bndr
-        usage'         = usage `delDetails` bndr
-        final_occ_info = case occ_info of IAmDead -> IAmDead
-                                          _       -> noOccInfo
-
     alt_env = mkAltEnv env scrut bndr
     occ_anal_alt = occAnalAlt alt_env
 
@@ -2027,10 +2006,9 @@ occAnalAlt :: (OccEnv, Maybe (Id, CoreExpr))
 occAnalAlt (env, scrut_bind) (con, bndrs, rhs)
   = case occAnal env rhs of { (rhs_usage1, rhs1) ->
     let
-        (alt_usg, tagged_bndrs) = tagLamBinders rhs_usage1 bndrs
-                                  -- See Note [Binders in case alternatives]
-        (alt_usg', rhs2) =
-          wrapAltRHS env scrut_bind alt_usg tagged_bndrs rhs1
+      (alt_usg, tagged_bndrs) = tagLamBinders rhs_usage1 bndrs
+                                -- See Note [Binders in case alternatives]
+      (alt_usg', rhs2) = wrapAltRHS env scrut_bind alt_usg tagged_bndrs rhs1
     in
     (alt_usg', (con, tagged_bndrs, rhs2)) }
 
@@ -2048,12 +2026,16 @@ wrapAltRHS env (Just (scrut_var, let_rhs)) alt_usg bndrs alt_rhs
   = ( alt_usg' `andUDs` let_rhs_usg
     , Let (NonRec tagged_scrut_var let_rhs') alt_rhs )
   where
-    captured = any (`usedIn` let_rhs_usg) bndrs
+    captured = any (`usedIn` let_rhs_usg) bndrs  -- Check condition (b)
+
     -- The rhs of the let may include coercion variables
     -- if the scrutinee was a cast, so we must gather their
     -- usage. See Note [Gather occurrences of coercion variables]
+    -- Moreover, the rhs of the let may mention the case-binder, and
+    -- we want to gather its occ-info as well
     (let_rhs_usg, let_rhs') = occAnal env let_rhs
-    (alt_usg', [tagged_scrut_var]) = tagLamBinders alt_usg [scrut_var]
+
+    (alt_usg', tagged_scrut_var) = tagLamBinder alt_usg scrut_var
 
 wrapAltRHS _ _ alt_usg _ alt_rhs
   = (alt_usg, alt_rhs)
@@ -2313,6 +2295,9 @@ Core Lint never expects to find an *occurrence* of an Id marked
 as Dead, so we must zap the OccInfo on cb before making the
 binding x = cb.  See Trac #5028.
 
+NB: the OccInfo on /occurrences/ really doesn't matter much; the simplifier
+doesn't use it. So this is only to satisfy the perhpas-over-picky Lint.
+
 Historical note [no-case-of-case]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 We *used* to suppress the binder-swap in case expressions when
@@ -2376,10 +2361,10 @@ information right.
 -}
 
 mkAltEnv :: OccEnv -> CoreExpr -> Id -> (OccEnv, Maybe (Id, CoreExpr))
--- Does two things: a) makes the occ_one_shots = OccVanilla
---                  b) extends the GlobalScruts if possible
---                  c) returns a proxy mapping, binding the scrutinee
---                     to the case binder, if possible
+-- Does three things: a) makes the occ_one_shots = OccVanilla
+--                    b) extends the GlobalScruts if possible
+--                    c) returns a proxy mapping, binding the scrutinee
+--                       to the case binder, if possible
 mkAltEnv env@(OccEnv { occ_gbl_scrut = pe }) scrut case_bndr
   = case stripTicksTopE (const True) scrut of
       Var v           -> add_scrut v case_bndr'
@@ -2388,15 +2373,19 @@ mkAltEnv env@(OccEnv { occ_gbl_scrut = pe }) scrut case_bndr
       _               -> (env { occ_encl = OccVanilla }, Nothing)
 
   where
-    add_scrut v rhs = ( env { occ_encl = OccVanilla, occ_gbl_scrut = pe `extendVarSet` v }
+    add_scrut v rhs = ( env { occ_encl = OccVanilla
+                            , occ_gbl_scrut = pe `extendVarSet` v }
                       , Just (localise v, rhs) )
 
-    case_bndr' = Var (zapIdOccInfo case_bndr) -- See Note [Zap case binders in proxy bindings]
-    localise scrut_var = mkLocalIdOrCoVar (localiseName (idName scrut_var)) (idType scrut_var)
-        -- Localise the scrut_var before shadowing it; we're making a
-        -- new binding for it, and it might have an External Name, or
-        -- even be a GlobalId; Note [Binder swap on GlobalId scrutinees]
-        -- Also we don't want any INLINE or NOINLINE pragmas!
+    case_bndr' = Var (zapIdOccInfo case_bndr)
+                   -- See Note [Zap case binders in proxy bindings]
+
+    -- Localise the scrut_var before shadowing it; we're making a
+    -- new binding for it, and it might have an External Name, or
+    -- even be a GlobalId; Note [Binder swap on GlobalId scrutinees]
+    -- Also we don't want any INLINE or NOINLINE pragmas!
+    localise scrut_var = mkLocalIdOrCoVar (localiseName (idName scrut_var))
+                                          (idType scrut_var)
 
 {-
 ************************************************************************
@@ -2447,7 +2436,7 @@ andUDs = combineUsageDetailsWith addOccInfo
 orUDs  = combineUsageDetailsWith orOccInfo
 
 andUDsList :: [UsageDetails] -> UsageDetails
-andUDsList = foldl andUDs emptyDetails
+andUDsList = foldl' andUDs emptyDetails
 
 mkOneOcc :: OccEnv -> Id -> InterestingCxt -> JoinArity -> UsageDetails
 mkOneOcc env id int_cxt arity
@@ -2512,6 +2501,10 @@ zapDetails = markAllMany . markAllNonTailCalled -- effectively sets to noOccInfo
 
 lookupDetails :: UsageDetails -> Id -> OccInfo
 lookupDetails ud id
+  | isCoVar id  -- We do not currenly gather occurrence info (from types)
+  = noOccInfo   -- for CoVars, so we must conservatively mark them as used
+                -- See Note [DoO not mark CoVars as dead]
+  | otherwise
   = case lookupVarEnv (ud_env ud) id of
       Just occ -> doZapping ud id occ
       Nothing  -> IAmDead
@@ -2522,6 +2515,25 @@ v `usedIn` ud = isExportedId v || v `elemVarEnv` ud_env ud
 udFreeVars :: VarSet -> UsageDetails -> VarSet
 -- Find the subset of bndrs that are mentioned in uds
 udFreeVars bndrs ud = restrictUniqSetToUFM bndrs (ud_env ud)
+
+{- Note [Do not mark CoVars as dead]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+It's obviously wrong to mark CoVars as dead if they are used.
+Currently we don't traverse types to gather usase info for CoVars,
+so we had better treat them as having noOccInfo.
+
+This showed up in Trac #15696 we had something like
+  case eq_sel d of co -> ...(typeError @(...co...) "urk")...
+
+Then 'd' was substitued by a dictionary, so the expression
+simpified to
+  case (Coercion <blah>) of co -> ...(typeError @(...co...) "urk")...
+
+But then the "drop the case altogether" equation of rebuildCase
+thought that 'co' was dead, and discarded the entire case. Urk!
+
+I have no idea how we managed to avoid this pitfall for so long!
+-}
 
 -------------------
 -- Auxiliary functions for UsageDetails implementation
@@ -2596,14 +2608,21 @@ tagLamBinders :: UsageDetails          -- Of scope
               -> [Id]                  -- Binders
               -> (UsageDetails,        -- Details with binders removed
                  [IdWithOccInfo])    -- Tagged binders
+tagLamBinders usage binders
+  = usage' `seq` (usage', bndrs')
+  where
+    (usage', bndrs') = mapAccumR tagLamBinder usage binders
+
+tagLamBinder :: UsageDetails       -- Of scope
+             -> Id                 -- Binder
+             -> (UsageDetails,     -- Details with binder removed
+                 IdWithOccInfo)    -- Tagged binders
 -- Used for lambda and case binders
 -- It copes with the fact that lambda bindings can have a
 -- stable unfolding, used for join points
-tagLamBinders usage binders = usage' `seq` (usage', bndrs')
+tagLamBinder usage bndr
+  = (usage2, bndr')
   where
-    (usage', bndrs') = mapAccumR tag_lam usage binders
-    tag_lam usage bndr = (usage2, bndr')
-      where
         occ    = lookupDetails usage bndr
         bndr'  = setBinderOcc (markNonTailCalled occ) bndr
                    -- Don't try to make an argument into a join point

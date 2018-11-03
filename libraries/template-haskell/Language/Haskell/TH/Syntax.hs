@@ -41,6 +41,7 @@ import GHC.Lexeme       ( startsVarSym, startsVarId )
 import GHC.ForeignSrcLang.Type
 import Language.Haskell.TH.LanguageExtensions
 import Numeric.Natural
+import Prelude
 
 import qualified Control.Monad.Fail as Fail
 
@@ -376,6 +377,19 @@ reifyFixity nm = Q (qReifyFixity nm)
 if @nm@ is the name of a type class, then all instances of this class at the types @tys@
 are returned. Alternatively, if @nm@ is the name of a data family or type family,
 all instances of this family at the types @tys@ are returned.
+
+Note that this is a \"shallow\" test; the declarations returned merely have
+instance heads which unify with @nm tys@, they need not actually be satisfiable.
+
+  - @reifyInstances ''Eq [ 'TupleT' 2 \``AppT`\` 'ConT' ''A \``AppT`\` 'ConT' ''B ]@ contains
+    the @instance (Eq a, Eq b) => Eq (a, b)@ regardless of whether @A@ and
+    @B@ themselves implement 'Eq'
+
+  - @reifyInstances ''Show [ 'VarT' ('mkName' "a") ]@ produces every available
+    instance of 'Eq'
+
+There is one edge case: @reifyInstances ''Typeable tys@ currently always
+produces an empty list (no matter what @tys@ are given).
 -}
 reifyInstances :: Name -> [Type] -> Q [InstanceDec]
 reifyInstances cls tys = Q (qReifyInstances cls tys)
@@ -396,7 +410,7 @@ reifyAnnotations an = Q (qReifyAnnotations an)
 
 -- | @reifyModule mod@ looks up information about module @mod@.  To
 -- look up the current module, call this function with the return
--- value of @thisModule@.
+-- value of 'Language.Haskell.TH.Lib.thisModule'.
 reifyModule :: Module -> Q ModuleInfo
 reifyModule m = Q (qReifyModule m)
 
@@ -473,7 +487,7 @@ addForeignFile = addForeignSource
 -- Note that for non-C languages (for example C++) @extern "C"@ directives
 -- must be used to get symbols that we can access from Haskell.
 --
--- To get better errors, it is reccomended to use #line pragmas when
+-- To get better errors, it is recommended to use #line pragmas when
 -- emitting C files, e.g.
 --
 -- > {-# LANGUAGE CPP #-}
@@ -494,7 +508,7 @@ addForeignSource lang src = do
   runIO $ writeFile path src
   addForeignFilePath lang path
 
--- | Same as 'addForeignSource', but expects to recieve a path pointing to the
+-- | Same as 'addForeignSource', but expects to receive a path pointing to the
 -- foreign file instead of a 'String' of its contents. Consider using this in
 -- conjunction with 'addTempFile'.
 --
@@ -731,8 +745,8 @@ trueName  = mkNameG DataName "ghc-prim" "GHC.Types" "True"
 falseName = mkNameG DataName "ghc-prim" "GHC.Types" "False"
 
 nothingName, justName :: Name
-nothingName = mkNameG DataName "base" "GHC.Base" "Nothing"
-justName    = mkNameG DataName "base" "GHC.Base" "Just"
+nothingName = mkNameG DataName "base" "GHC.Maybe" "Nothing"
+justName    = mkNameG DataName "base" "GHC.Maybe" "Just"
 
 leftName, rightName :: Name
 leftName  = mkNameG DataName "base" "Data.Either" "Left"
@@ -891,7 +905,7 @@ newtype ModName = ModName String        -- Module name
 newtype PkgName = PkgName String        -- package name
  deriving (Show,Eq,Ord,Data,Generic)
 
--- | Obtained from 'reifyModule' and 'thisModule'.
+-- | Obtained from 'reifyModule' and 'Language.Haskell.TH.Lib.thisModule'.
 data Module = Module PkgName ModName -- package qualified module name
  deriving (Show,Eq,Ord,Data,Generic)
 
@@ -1115,7 +1129,7 @@ Note that @mkName@ may be used with qualified names:
 > mkName "Prelude.pi"
 
 See also 'Language.Haskell.TH.Lib.dyn' for a useful combinator. The above example could
-be rewritten using 'dyn' as
+be rewritten using 'Language.Haskell.TH.Lib.dyn' as
 
 > f = [| pi + $(dyn "pi") |]
 -}
@@ -1343,7 +1357,10 @@ data Info
        Type
        ParentName
 
-  -- | A \"plain\" type constructor. \"Fancier\" type constructors are returned using 'PrimTyConI' or 'FamilyI' as appropriate
+  -- | A \"plain\" type constructor. \"Fancier\" type constructors are returned
+  -- using 'PrimTyConI' or 'FamilyI' as appropriate. At present, this reified
+  -- declaration will never have derived instances attached to it (if you wish
+  -- to check for an instance, see 'reifyInstances').
   | TyConI
         Dec
 
@@ -1353,7 +1370,8 @@ data Info
         Dec
         [InstanceDec]
 
-  -- | A \"primitive\" type constructor, which can't be expressed with a 'Dec'. Examples: @(->)@, @Int#@.
+  -- | A \"primitive\" type constructor, which can't be expressed with a 'Dec'.
+  -- Examples: @(->)@, @Int#@.
   | PrimTyConI
        Name
        Arity
@@ -1365,7 +1383,7 @@ data Info
        Type
        ParentName
 
-  -- | A pattern synonym.
+  -- | A pattern synonym
   | PatSynI
        Name
        PatSynType
@@ -1374,9 +1392,9 @@ data Info
   A \"value\" variable (as opposed to a type variable, see 'TyVarI').
 
   The @Maybe Dec@ field contains @Just@ the declaration which
-  defined the variable -- including the RHS of the declaration --
+  defined the variable - including the RHS of the declaration -
   or else @Nothing@, in the case where the RHS is unavailable to
-  the compiler. At present, this value is _always_ @Nothing@:
+  the compiler. At present, this value is /always/ @Nothing@:
   returning the RHS has not yet been implemented because of
   lack of interest.
   -}
@@ -1600,9 +1618,10 @@ data Exp
   | UnboxedSumE Exp SumAlt SumArity    -- ^ @{ (\#|e|\#) }@
   | CondE Exp Exp Exp                  -- ^ @{ if e1 then e2 else e3 }@
   | MultiIfE [(Guard, Exp)]            -- ^ @{ if | g1 -> e1 | g2 -> e2 }@
-  | LetE [Dec] Exp                     -- ^ @{ let x=e1;   y=e2 in e3 }@
+  | LetE [Dec] Exp                     -- ^ @{ let { x=e1; y=e2 } in e3 }@
   | CaseE Exp [Match]                  -- ^ @{ case e of m1; m2 }@
   | DoE [Stmt]                         -- ^ @{ do { p <- e1; e2 }  }@
+  | MDoE [Stmt]                        -- ^ @{ mdo { x <- e1 y; y <- e2 x; } }@
   | CompE [Stmt]                       -- ^ @{ [ (x,y) | x <- xs, y <- ys ] }@
       --
       -- The result expression of the comprehension is
@@ -1620,8 +1639,14 @@ data Exp
   | RecConE Name [FieldExp]            -- ^ @{ T { x = y, z = w } }@
   | RecUpdE Exp [FieldExp]             -- ^ @{ (f x) { z = w } }@
   | StaticE Exp                        -- ^ @{ static e }@
-  | UnboundVarE Name                   -- ^ @{ _x }@ (hole)
+  | UnboundVarE Name                   -- ^ @{ _x }@
+                                       --
+                                       -- This is used for holes or unresolved
+                                       -- identifiers in AST quotes. Note that
+                                       -- it could either have a variable name
+                                       -- or constructor name.
   | LabelE String                      -- ^ @{ #x }@ ( Overloaded label )
+  | ImplicitParamVarE String           -- ^ @{ ?x }@ ( Implicit parameter )
   deriving( Show, Eq, Ord, Data, Generic )
 
 type FieldExp = (Name,Exp)
@@ -1641,10 +1666,11 @@ data Guard
   deriving( Show, Eq, Ord, Data, Generic )
 
 data Stmt
-  = BindS Pat Exp
-  | LetS [ Dec ]
-  | NoBindS Exp
-  | ParS [[Stmt]]
+  = BindS Pat Exp -- ^ @p <- e@
+  | LetS [ Dec ]  -- ^ @{ let { x=e1; y=e2 } }@
+  | NoBindS Exp   -- ^ @e@
+  | ParS [[Stmt]] -- ^ @x <- e1 | s2, s3 | s4@ (in 'CompE')
+  | RecS [Stmt]   -- ^ @rec { s1; s2 }@
   deriving( Show, Eq, Ord, Data, Generic )
 
 data Range = FromR Exp | FromThenR Exp Exp
@@ -1685,14 +1711,18 @@ data Dec
                (Maybe Kind)
          -- ^ @{ data family T a b c :: * }@
 
-  | DataInstD Cxt Name [Type]
+  | DataInstD Cxt Name
+             (Maybe [TyVarBndr])  -- Quantified type vars
+             [Type]
              (Maybe Kind)         -- Kind signature
              [Con] [DerivClause]  -- ^ @{ data instance Cxt x => T [x]
                                   --       = A x | B (T x)
                                   --       deriving (Z,W)
                                   --       deriving stock Eq }@
 
-  | NewtypeInstD Cxt Name [Type]
+  | NewtypeInstD Cxt Name
+                 (Maybe [TyVarBndr])  -- Quantified type vars
+                 [Type]
                  (Maybe Kind)      -- Kind signature
                  Con [DerivClause] -- ^ @{ newtype instance Cxt x => T [x]
                                    --        = A (B x)
@@ -1723,6 +1753,12 @@ data Dec
       -- pattern synonyms are supported. See 'PatSynArgs' for details
 
   | PatSynSigD Name PatSynType  -- ^ A pattern synonym's type signature.
+
+  | ImplicitParamBindD String Exp
+      -- ^ @{ ?x = expr }@
+      --
+      -- Implicit parameter binding declaration. Can only be used in let
+      -- and where clauses which consist entirely of implicit bindings.
   deriving( Show, Eq, Ord, Data, Generic )
 
 -- | Varieties of allowed instance overlap.
@@ -1743,53 +1779,54 @@ data DerivClause = DerivClause (Maybe DerivStrategy) Cxt
 data DerivStrategy = StockStrategy    -- ^ A \"standard\" derived instance
                    | AnyclassStrategy -- ^ @-XDeriveAnyClass@
                    | NewtypeStrategy  -- ^ @-XGeneralizedNewtypeDeriving@
+                   | ViaStrategy Type -- ^ @-XDerivingVia@
   deriving( Show, Eq, Ord, Data, Generic )
 
--- | A Pattern synonym's type. Note that a pattern synonym's *fully*
+-- | A pattern synonym's type. Note that a pattern synonym's /fully/
 -- specified type has a peculiar shape coming with two forall
 -- quantifiers and two constraint contexts. For example, consider the
 -- pattern synonym
 --
---   pattern P x1 x2 ... xn = <some-pattern>
+-- > pattern P x1 x2 ... xn = <some-pattern>
 --
 -- P's complete type is of the following form
 --
---   forall universals. required constraints
---     => forall existentials. provided constraints
---     => t1 -> t2 -> ... -> tn -> t
+-- > pattern P :: forall universals.   required constraints
+-- >           => forall existentials. provided constraints
+-- >           => t1 -> t2 -> ... -> tn -> t
 --
 -- consisting of four parts:
 --
---   1) the (possibly empty lists of) universally quantified type
+--   1. the (possibly empty lists of) universally quantified type
 --      variables and required constraints on them.
---   2) the (possibly empty lists of) existentially quantified
+--   2. the (possibly empty lists of) existentially quantified
 --      type variables and the provided constraints on them.
---   3) the types t1, t2, .., tn of x1, x2, .., xn, respectively
---   4) the type t of <some-pattern>, mentioning only universals.
+--   3. the types @t1@, @t2@, .., @tn@ of @x1@, @x2@, .., @xn@, respectively
+--   4. the type @t@ of @\<some-pattern\>@, mentioning only universals.
 --
 -- Pattern synonym types interact with TH when (a) reifying a pattern
 -- synonym, (b) pretty printing, or (c) specifying a pattern synonym's
 -- type signature explicitly:
 --
--- (a) Reification always returns a pattern synonym's *fully* specified
+--   * Reification always returns a pattern synonym's /fully/ specified
 --     type in abstract syntax.
 --
--- (b) Pretty printing via 'pprPatSynType' abbreviates a pattern
---     synonym's type unambiguously in concrete syntax: The rule of
+--   * Pretty printing via 'Language.Haskell.TH.Ppr.pprPatSynType' abbreviates
+--     a pattern synonym's type unambiguously in concrete syntax: The rule of
 --     thumb is to print initial empty universals and the required
---     context as `() =>`, if existentials and a provided context
+--     context as @() =>@, if existentials and a provided context
 --     follow. If only universals and their required context, but no
 --     existentials are specified, only the universals and their
 --     required context are printed. If both or none are specified, so
 --     both (or none) are printed.
 --
--- (c) When specifying a pattern synonym's type explicitly with
+--   * When specifying a pattern synonym's type explicitly with
 --     'PatSynSigD' either one of the universals, the existentials, or
 --     their contexts may be left empty.
 --
 -- See the GHC user's guide for more information on pattern synonyms
--- and their types: https://downloads.haskell.org/~ghc/latest/docs/html/
--- users_guide/syntax-extns.html#pattern-synonyms.
+-- and their types:
+-- <https://downloads.haskell.org/~ghc/latest/docs/html/users_guide/glasgow_exts.html#pattern-synonyms>.
 type PatSynType = Type
 
 -- | Common elements of 'OpenTypeFamilyD' and 'ClosedTypeFamilyD'. By
@@ -1804,7 +1841,7 @@ data TypeFamilyHead =
 -- | One equation of a type family instance or closed type family. The
 -- arguments are the left-hand-side type patterns and the right-hand-side
 -- result.
-data TySynEqn = TySynEqn [Type] Type
+data TySynEqn = TySynEqn (Maybe [TyVarBndr]) [Type] Type
   deriving( Show, Eq, Ord, Data, Generic )
 
 data FunDep = FunDep [Name] [Name]
@@ -1824,7 +1861,7 @@ data Safety = Unsafe | Safe | Interruptible
 data Pragma = InlineP         Name Inline RuleMatch Phases
             | SpecialiseP     Name Type (Maybe Inline) Phases
             | SpecialiseInstP Type
-            | RuleP           String [RuleBndr] Exp Exp Phases
+            | RuleP           String (Maybe [TyVarBndr]) [RuleBndr] Exp Exp Phases
             | AnnP            AnnTarget Exp
             | LineP           Int String
             | CompleteP       [Name] (Maybe Name)
@@ -2008,6 +2045,7 @@ data Type = ForallT [TyVarBndr] Cxt Type  -- ^ @forall \<vars\>. \<ctxt\> => \<t
           | ConstraintT                   -- ^ @Constraint@
           | LitT TyLit                    -- ^ @0,1,2, etc.@
           | WildCardT                     -- ^ @_@
+          | ImplicitParamT String Type    -- ^ @?x :: t@
       deriving( Show, Eq, Ord, Data, Generic )
 
 data TyVarBndr = PlainTV  Name            -- ^ @a@

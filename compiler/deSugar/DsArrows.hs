@@ -1213,7 +1213,6 @@ collectl (L _ pat) bndrs
     go (ParPat _ pat)             = collectl pat bndrs
 
     go (ListPat _ pats)           = foldr collectl bndrs pats
-    go (PArrPat _ pats)           = foldr collectl bndrs pats
     go (TuplePat _ pats _)        = foldr collectl bndrs pats
     go (SumPat _ pat _ _)         = collectl pat bndrs
 
@@ -1225,7 +1224,7 @@ collectl (L _ pat) bndrs
     go (NPat {})                  = bndrs
     go (NPlusKPat _ (L _ n) _ _ _ _) = n : bndrs
 
-    go (SigPat _ pat)             = collectl pat bndrs
+    go (SigPat _ pat _)           = collectl pat bndrs
     go (CoPat _ _ pat _)          = collectl (noLoc pat) bndrs
     go (ViewPat _ _ pat)          = collectl pat bndrs
     go p@(SplicePat {})           = pprPanic "collectl/go" (ppr p)
