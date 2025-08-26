@@ -425,9 +425,9 @@ class TestPrimop f where
   testPrimopDivLike :: String -> f -> f -> Test
   testPrimopDivLike _ _ _ = error "Div testing not supported for this type."
 
--- | Special test method for shift operations that bounds the shift amount
-testPrimopShift :: String -> f -> f -> Test
-testPrimopShift _ _ _ = error "Shift testing not supported for this type."
+  -- | Special test method for shift operations that bounds the shift amount
+  testPrimopShift :: String -> f -> f -> Test
+  testPrimopShift _ _ _ = error "Shift testing not supported for this type."
 
 {-
 instance TestPrimop (Int# -> Int# -> Int#) where
