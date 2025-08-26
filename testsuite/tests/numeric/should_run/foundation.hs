@@ -163,6 +163,22 @@ boundedShiftWord = do
   x <- arbitrary
   return $ BoundedShift (abs x `mod` finiteBitSize (undefined :: Word))
 
+-- Arbitrary instances for BoundedShift types to work with lambda patterns
+instance Arbitrary (BoundedShift Int8) where
+  arbitrary = boundedShift8
+
+instance Arbitrary (BoundedShift Int16) where
+  arbitrary = boundedShift16
+
+instance Arbitrary (BoundedShift Int32) where
+  arbitrary = boundedShift32
+
+instance Arbitrary (BoundedShift Int64) where
+  arbitrary = boundedShift64
+
+instance Arbitrary (BoundedShift Int) where
+  arbitrary = boundedShiftWord
+
 instance Arbitrary Natural where
     arbitrary = integralDownsize . (`mod` 10000) . abs <$> arbitraryInt64
 
@@ -743,10 +759,7 @@ instance TestPrimop (Char# -> Int#) where
 instance TestPrimop (Int# -> Int# -> Int#) where
   testPrimop s l r = Property s $ \ (uInt#-> x0) (uInt#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
   testPrimopDivLike s l r = Property s $ twoNonZero $ \ (uInt#-> x0) (uInt#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uInt# <$> arbitrary
-    BoundedShift x1 <- boundedShiftWord
-    return $ PropertyEOA $ wInt# (l x0 (uInt# x1)) === wInt# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uInt# -> x0) (BoundedShift shift :: BoundedShift Int) -> wInt# (l x0 (uInt# shift)) === wInt# (r x0 (uInt# shift))
 
 instance TestPrimop (Int# -> Int# -> (# Int#,Int# #)) where
   testPrimop s l r = Property s $ \ (uInt#-> x0) (uInt#-> x1) -> WTUP2(wInt#,wInt#, (l x0 x1)) === WTUP2(wInt#,wInt#, (r x0 x1))
@@ -779,10 +792,7 @@ instance TestPrimop (Int# -> Word#) where
 
 instance TestPrimop (Int16# -> Int# -> Int16#) where
   testPrimop s l r = Property s $ \ (uInt16#-> x0) (uInt#-> x1) -> wInt16# (l x0 x1) === wInt16# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uInt16# <$> arbitrary
-    BoundedShift x1 <- boundedShift16
-    return $ PropertyEOA $ wInt16# (l x0 (uInt# x1)) === wInt16# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uInt16# -> x0) (BoundedShift shift :: BoundedShift Int16) -> wInt16# (l x0 (uInt# shift)) === wInt16# (r x0 (uInt# shift))
 
 instance TestPrimop (Int16# -> Int16# -> Int#) where
   testPrimop s l r = Property s $ \ (uInt16#-> x0) (uInt16#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -807,10 +817,7 @@ instance TestPrimop (Int16# -> Word16#) where
 
 instance TestPrimop (Int32# -> Int# -> Int32#) where
   testPrimop s l r = Property s $ \ (uInt32#-> x0) (uInt#-> x1) -> wInt32# (l x0 x1) === wInt32# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uInt32# <$> arbitrary
-    BoundedShift x1 <- boundedShift32
-    return $ PropertyEOA $ wInt32# (l x0 (uInt# x1)) === wInt32# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uInt32# -> x0) (BoundedShift shift :: BoundedShift Int32) -> wInt32# (l x0 (uInt# shift)) === wInt32# (r x0 (uInt# shift))
 
 instance TestPrimop (Int32# -> Int32# -> Int#) where
   testPrimop s l r = Property s $ \ (uInt32#-> x0) (uInt32#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -835,10 +842,7 @@ instance TestPrimop (Int32# -> Word32#) where
 
 instance TestPrimop (Int64# -> Int# -> Int64#) where
   testPrimop s l r = Property s $ \ (uInt64#-> x0) (uInt#-> x1) -> wInt64# (l x0 x1) === wInt64# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uInt64# <$> arbitrary
-    BoundedShift x1 <- boundedShift64
-    return $ PropertyEOA $ wInt64# (l x0 (uInt# x1)) === wInt64# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uInt64# -> x0) (BoundedShift shift :: BoundedShift Int64) -> wInt64# (l x0 (uInt# shift)) === wInt64# (r x0 (uInt# shift))
 
 instance TestPrimop (Int64# -> Int64# -> Int#) where
   testPrimop s l r = Property s $ \ (uInt64#-> x0) (uInt64#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -859,10 +863,7 @@ instance TestPrimop (Int64# -> Word64#) where
 
 instance TestPrimop (Int8# -> Int# -> Int8#) where
   testPrimop s l r = Property s $ \ (uInt8#-> x0) (uInt#-> x1) -> wInt8# (l x0 x1) === wInt8# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uInt8# <$> arbitrary
-    BoundedShift x1 <- boundedShift8
-    return $ PropertyEOA $ wInt8# (l x0 (uInt# x1)) === wInt8# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uInt8# -> x0) (BoundedShift shift :: BoundedShift Int8) -> wInt8# (l x0 (uInt# shift)) === wInt8# (r x0 (uInt# shift))
 
 instance TestPrimop (Int8# -> Int8# -> Int#) where
   testPrimop s l r = Property s $ \ (uInt8#-> x0) (uInt8#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -887,10 +888,7 @@ instance TestPrimop (Int8# -> Word8#) where
 
 instance TestPrimop (Word# -> Int# -> Word#) where
   testPrimop s l r = Property s $ \ (uWord#-> x0) (uInt#-> x1) -> wWord# (l x0 x1) === wWord# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uWord# <$> arbitrary
-    BoundedShift x1 <- boundedShiftWord
-    return $ PropertyEOA $ wWord# (l x0 (uInt# x1)) === wWord# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uWord# -> x0) (BoundedShift shift :: BoundedShift Int) -> wWord# (l x0 (uInt# shift)) === wWord# (r x0 (uInt# shift))
 
 instance TestPrimop (Word# -> Word# -> Int#) where
   testPrimop s l r = Property s $ \ (uWord#-> x0) (uWord#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -928,10 +926,7 @@ instance TestPrimop (Word# -> Word8#) where
 
 instance TestPrimop (Word16# -> Int# -> Word16#) where
   testPrimop s l r = Property s $ \ (uWord16#-> x0) (uInt#-> x1) -> wWord16# (l x0 x1) === wWord16# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uWord16# <$> arbitrary
-    BoundedShift x1 <- boundedShift16
-    return $ PropertyEOA $ wWord16# (l x0 (uInt# x1)) === wWord16# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uWord16# -> x0) (BoundedShift shift :: BoundedShift Int16) -> wWord16# (l x0 (uInt# shift)) === wWord16# (r x0 (uInt# shift))
 
 instance TestPrimop (Word16# -> Word16# -> Int#) where
   testPrimop s l r = Property s $ \ (uWord16#-> x0) (uWord16#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -956,10 +951,7 @@ instance TestPrimop (Word16# -> Word16#) where
 
 instance TestPrimop (Word32# -> Int# -> Word32#) where
   testPrimop s l r = Property s $ \ (uWord32#-> x0) (uInt#-> x1) -> wWord32# (l x0 x1) === wWord32# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uWord32# <$> arbitrary
-    BoundedShift x1 <- boundedShift32
-    return $ PropertyEOA $ wWord32# (l x0 (uInt# x1)) === wWord32# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uWord32# -> x0) (BoundedShift shift :: BoundedShift Int32) -> wWord32# (l x0 (uInt# shift)) === wWord32# (r x0 (uInt# shift))
 
 instance TestPrimop (Word32# -> Word32# -> Int#) where
   testPrimop s l r = Property s $ \ (uWord32#-> x0) (uWord32#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -984,10 +976,7 @@ instance TestPrimop (Word32# -> Word32#) where
 
 instance TestPrimop (Word64# -> Int# -> Word64#) where
   testPrimop s l r = Property s $ \ (uWord64#-> x0) (uInt#-> x1) -> wWord64# (l x0 x1) === wWord64# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uWord64# <$> arbitrary
-    BoundedShift x1 <- boundedShift64
-    return $ PropertyEOA $ wWord64# (l x0 (uInt# x1)) === wWord64# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uWord64# -> x0) (BoundedShift shift :: BoundedShift Int64) -> wWord64# (l x0 (uInt# shift)) === wWord64# (r x0 (uInt# shift))
 
 instance TestPrimop (Word64# -> Word64# -> Int#) where
   testPrimop s l r = Property s $ \ (uWord64#-> x0) (uWord64#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
@@ -1008,10 +997,7 @@ instance TestPrimop (Word64# -> Word64#) where
 
 instance TestPrimop (Word8# -> Int# -> Word8#) where
   testPrimop s l r = Property s $ \ (uWord8#-> x0) (uInt#-> x1) -> wWord8# (l x0 x1) === wWord8# (r x0 x1)
-  testPrimopShift s l r = Prop $ do
-    x0 <- uWord8# <$> arbitrary
-    BoundedShift x1 <- boundedShift8
-    return $ PropertyEOA $ wWord8# (l x0 (uInt# x1)) === wWord8# (r x0 (uInt# x1))
+  testPrimopShift s l r = Property s $ \(uWord8# -> x0) (BoundedShift shift :: BoundedShift Int8) -> wWord8# (l x0 (uInt# shift)) === wWord8# (r x0 (uInt# shift))
 
 instance TestPrimop (Word8# -> Word8# -> Int#) where
   testPrimop s l r = Property s $ \ (uWord8#-> x0) (uWord8#-> x1) -> wInt# (l x0 x1) === wInt# (r x0 x1)
