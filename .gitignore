@@ -202,6 +202,7 @@ _darcs/
 /testsuite_summary*.txt
 /testsuite*.xml
 /testlog*
+/testsuite/ghc-config/ghc-config
 /utils/iserv/iserv.cabal
 /utils/iserv-proxy/iserv-proxy.cabal
 /utils/remote-iserv/remote-iserv.cabal
