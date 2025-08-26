@@ -761,6 +761,8 @@ gen_foundation_tests (Info _ entries)
       , (testable (ty po))
       = let testPrimOpHow = if is_divLikeOp po
               then "testPrimopDivLike"
+              else if is_shiftLikeOp po
+              then "testPrimopShift"
               else "testPrimop"
             qualOp qualification =
               let qName = wrap qualification poName
