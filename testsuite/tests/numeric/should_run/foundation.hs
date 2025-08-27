@@ -143,7 +143,7 @@ boundedShift8 = do
   x <- arbitrary
   return $ BoundedShift (abs x `mod` 8)
 
-boundedShift16 :: Gen (BoundedShift Int16) 
+boundedShift16 :: Gen (BoundedShift Int16)
 boundedShift16 = do
   x <- arbitrary
   return $ BoundedShift (abs x `mod` 16)
