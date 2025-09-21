@@ -1,0 +1,13 @@
+Testing div_like primop exception handling...
+Testing Int8# division by zero exception handling
+  ✓ quotInt8# division by zero raised exception
+  ✓ remInt8# division by zero raised exception
+  ✓ quotRemInt8# division by zero raised exception
+Testing Int8# overflow exception handling
+  ✓ quotInt8# overflow raised exception
+  ✓ remInt8# overflow raised exception
+  ✓ quotInt16# overflow raised exception
+Testing Word8# division by zero exception handling
+  ✓ quotWord8# division by zero raised exception
+  ✓ remWord8# division by zero raised exception
+All exception handling tests completed!

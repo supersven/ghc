@@ -1,0 +1,36 @@
+Testing div_like primop good cases...
+Testing Int8# good cases
+  ✓ quotInt8# 42# 6#
+  ✓ remInt8# 42# 6#
+  ✓ quotInt8# (-42#) 6#
+  ✓ remInt8# (-42#) 6#
+  ✓ quotInt8# 127# 1#
+  ✓ quotInt8# (-127#) 1#
+  ✓ quotInt8# (-128#) 2#
+  ✓ quotRemInt8# 42# 6# (quot)
+  ✓ quotRemInt8# 42# 6# (rem)
+Testing Int16# good cases
+  ✓ quotInt16# 1000# 10#
+  ✓ remInt16# 1000# 10#
+  ✓ quotInt16# 32767# 1#
+  ✓ quotInt16# (-32768#) 2#
+Testing Int32# good cases
+  ✓ quotInt32# 1000000# 1000#
+  ✓ remInt32# 1000000# 1000#
+Testing Int# good cases
+  ✓ quotInt# 1000000# 1000#
+  ✓ remInt# 1000000# 1000#
+Testing Word8# good cases
+  ✓ quotWord8# 200## 10##
+  ✓ remWord8# 200## 10##
+  ✓ quotWord8# 255## 1##
+Testing Word16# good cases
+  ✓ quotWord16# 10000## 100##
+  ✓ remWord16# 10000## 100##
+Testing Word32# good cases
+  ✓ quotWord32# 1000000## 1000##
+  ✓ remWord32# 1000000## 1000##
+Testing Word# good cases
+  ✓ quotWord# 1000000## 1000##
+  ✓ remWord# 1000000## 1000##
+All div_like good cases passed!

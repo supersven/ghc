@@ -1,0 +1,57 @@
+Comprehensive div_like primop boundary test...
+
+=== Testing Good Cases ===
+Testing basic operations...
+  ✓ Int8# basic
+  ✓ Int8# rem
+  ✓ Int16# basic
+  ✓ Int16# rem
+  ✓ Int32# basic
+  ✓ Int32# rem
+  ✓ Int# basic
+  ✓ Int# rem
+  ✓ Word8# basic
+  ✓ Word8# rem
+  ✓ Word16# basic
+  ✓ Word16# rem
+  ✓ Word32# basic
+  ✓ Word32# rem
+  ✓ Word# basic
+  ✓ Word# rem
+Testing edge cases that should work...
+  ✓ Int8# div by 1
+  ✓ Int8# div maxBound by 1
+  ✓ Word8# div by 1
+  ✓ Int8# half minBound
+  ✓ Int16# half minBound
+  ✓ Int8# div by large
+  ✓ Word8# div by large
+
+=== Testing Bad Cases (should raise exceptions) ===
+Testing division by zero for all types...
+  ✓ Int8# quot div by zero (exception raised as expected)
+  ✓ Int8# rem div by zero (exception raised as expected)
+  ✓ Int8# quotRem div by zero (exception raised as expected)
+  ✓ Int16# quot div by zero (exception raised as expected)
+  ✓ Int16# rem div by zero (exception raised as expected)
+  ✓ Int32# quot div by zero (exception raised as expected)
+  ✓ Int32# rem div by zero (exception raised as expected)
+  ✓ Int# quot div by zero (exception raised as expected)
+  ✓ Int# rem div by zero (exception raised as expected)
+  ✓ Word8# quot div by zero (exception raised as expected)
+  ✓ Word8# rem div by zero (exception raised as expected)
+  ✓ Word16# quot div by zero (exception raised as expected)
+  ✓ Word16# rem div by zero (exception raised as expected)
+  ✓ Word32# quot div by zero (exception raised as expected)
+  ✓ Word32# rem div by zero (exception raised as expected)
+  ✓ Word# quot div by zero (exception raised as expected)
+  ✓ Word# rem div by zero (exception raised as expected)
+Testing overflow for all signed types...
+  ✓ Int8# quot overflow (exception raised as expected)
+  ✓ Int8# rem overflow (exception raised as expected)
+  ✓ Int8# quotRem overflow (exception raised as expected)
+  ✓ Int16# quot overflow (exception raised as expected)
+  ✓ Int16# rem overflow (exception raised as expected)
+  ✓ Int32# quot overflow (exception raised as expected)
+  ✓ Int32# rem overflow (exception raised as expected)
+All comprehensive tests completed successfully!
