@@ -2043,6 +2043,15 @@ genericWordQuotRemOp _ _ _ = panic "genericWordQuotRemOp"
 genericWordQuotRem2Op :: Platform -> GenericOp
 genericWordQuotRem2Op platform [res_q, res_r] [arg_u1, arg_u0, arg_v]
     = do
+      -- Check for division by zero
+      let zeroLit = CmmLit (CmmInt 0 (wordWidth platform))
+          isZero = CmmMachOp (MO_Eq (wordWidth platform)) [arg_v, zeroLit]
+      
+      -- Emit conditional error call
+      divErrorFailed <- getCode $
+        emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+      emit =<< mkCmmIfThen' isZero divErrorFailed (Just False)
+      
       -- v gets modified below based on clz v
       v <- newTemp ty
       emit $ mkAssign (CmmLocal v) arg_v
