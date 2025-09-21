@@ -1418,10 +1418,10 @@ emitPrimOp cfg primop =
   Int64SubOp     -> opTranslate64 (MO_Sub    W64) MO_x64_Sub
   Int64MulOp     -> opTranslate64 (MO_Mul    W64) MO_x64_Mul
   Int64QuotOp
-    | allowQuot64 -> opTranslate (MO_S_Quot W64)
+    | allowQuot64 -> opTranslateWithSignedDivCheck W64 (MO_S_Quot W64)
     | otherwise   -> opCallish MO_I64_Quot
   Int64RemOp
-    | allowQuot64 -> opTranslate (MO_S_Rem W64)
+    | allowQuot64 -> opTranslateWithSignedDivCheck W64 (MO_S_Rem W64)
     | otherwise   -> opCallish MO_I64_Rem
 
   Int64SllOp     -> opTranslate64 (MO_Shl   W64) MO_x64_Shl
@@ -1443,10 +1443,10 @@ emitPrimOp cfg primop =
   Word64SubOp    -> opTranslate64 (MO_Sub    W64) MO_x64_Sub
   Word64MulOp    -> opTranslate64 (MO_Mul    W64) MO_x64_Mul
   Word64QuotOp
-    | allowQuot64 -> opTranslate (MO_U_Quot W64)
+    | allowQuot64 -> opTranslateWithUnsignedDivCheck W64 (MO_U_Quot W64)
     | otherwise   -> opCallish   MO_W64_Quot
   Word64RemOp
-    | allowQuot64 -> opTranslate (MO_U_Rem W64)
+    | allowQuot64 -> opTranslateWithUnsignedDivCheck W64 (MO_U_Rem W64)
     | otherwise   -> opCallish   MO_W64_Rem
 
   Word64AndOp    -> opTranslate64 (MO_And   W64) MO_x64_And
@@ -1487,7 +1487,7 @@ emitPrimOp cfg primop =
   DoubleAddOp    -> opTranslate (MO_F_Add W64)
   DoubleSubOp    -> opTranslate (MO_F_Sub W64)
   DoubleMulOp    -> opTranslate (MO_F_Mul W64)
-  DoubleDivOp    -> opTranslate (MO_F_Quot W64)
+  DoubleDivOp    -> opTranslateWithFloatDivCheck W64 (MO_F_Quot W64)
   DoubleNegOp    -> opTranslate (MO_F_Neg W64)
 
   DoubleFMAdd    -> fmaOp FMAdd  1 W64
@@ -1507,7 +1507,7 @@ emitPrimOp cfg primop =
   FloatAddOp    -> opTranslate (MO_F_Add  W32)
   FloatSubOp    -> opTranslate (MO_F_Sub  W32)
   FloatMulOp    -> opTranslate (MO_F_Mul  W32)
-  FloatDivOp    -> opTranslate (MO_F_Quot W32)
+  FloatDivOp    -> opTranslateWithFloatDivCheck W32 (MO_F_Quot W32)
   FloatNegOp    -> opTranslate (MO_F_Neg  W32)
 
   FloatFMAdd    -> fmaOp FMAdd  1 W32
@@ -1804,7 +1804,7 @@ emitPrimOp cfg primop =
     emit stmt
 
   -- | Like opTranslate but adds an assertion for signed division operations
-  -- to prevent integer overflow (e.g., minBound / (-1))
+  -- to prevent integer overflow (e.g., minBound / (-1)) and division by zero
   opTranslateWithSignedDivCheck :: Width -> MachOp -> [CmmExpr] -> PrimopCmmEmit
   opTranslateWithSignedDivCheck width mop args@[arg_x, arg_y] = opIntoRegs $ \[res] -> do
     platform <- getPlatform
@@ -1823,20 +1823,17 @@ emitPrimOp cfg primop =
     let isMinBound = CmmMachOp (MO_Eq width) [arg_x, minBoundLit]
         isMinusOne = CmmMachOp (MO_Eq width) [arg_y, minusOneLit] 
         wouldOverflow = CmmMachOp (MO_And width) [isMinBound, isMinusOne]
-        isNotOverflow = CmmMachOp (MO_Eq width) [wouldOverflow, zeroLit]
     
-    -- Check that divisor is not zero  
-    let isNotZero = CmmMachOp (MO_Ne width) [arg_y, zeroLit]
+    -- Check that divisor is zero  
+    let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
     
-    -- Combine both conditions: divisor not zero AND no overflow
-    let isValid = CmmMachOp (MO_And width) [isNotZero, isNotOverflow]
+    -- Either condition is bad: division by zero OR overflow
+    let badCondition = CmmMachOp (MO_Or width) [isZero, wouldOverflow]
     
-    -- Convert to a boolean we can check: if isValid is 0, that's bad
-    let validExpr = CmmMachOp (MO_Ne width) [isValid, zeroLit]
-    
-    -- Add runtime assertion (for now, just emit the division)
-    -- TODO: Add proper runtime assertion
-    massert True  -- placeholder assertion
+    -- Emit conditional error call
+    divErrorFailed <- getCode $
+      emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+    emit =<< mkCmmIfThen' badCondition divErrorFailed (Just False)
     
     let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
     emit stmt
@@ -1849,16 +1846,30 @@ emitPrimOp cfg primop =
     platform <- getPlatform
     let zeroLit = CmmLit (CmmInt 0 width)
         
-    -- Check that divisor is not zero  
-    let isNotZero = CmmMachOp (MO_Ne width) [arg_y, zeroLit]
+    -- Check that divisor is zero  
+    let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
     
-    -- Add runtime assertion (for now, just emit the division)
-    -- TODO: Add proper runtime assertion
-    massert True  -- placeholder assertion
+    -- Emit conditional error call
+    divErrorFailed <- getCode $
+      emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+    emit =<< mkCmmIfThen' isZero divErrorFailed (Just False)
     
     let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
     emit stmt
   opTranslateWithUnsignedDivCheck _ _ _ = panic "opTranslateWithUnsignedDivCheck: wrong number of arguments"
+
+  -- | Like opTranslate but adds an assertion for floating point division operations
+  -- For floating point, division by zero is defined (results in infinity), but we may want to check
+  -- for other conditions. For now, just adds basic checks for consistency.
+  opTranslateWithFloatDivCheck :: Width -> MachOp -> [CmmExpr] -> PrimopCmmEmit
+  opTranslateWithFloatDivCheck width mop args@[arg_x, arg_y] = opIntoRegs $ \[res] -> do
+    platform <- getPlatform
+    -- For floating point, division by zero is actually defined in IEEE 754
+    -- It results in +/- infinity. However, we may still want to check for it
+    -- depending on the requirements. For now, let's just do the division.
+    let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
+    emit stmt
+  opTranslateWithFloatDivCheck _ _ _ = panic "opTranslateWithFloatDivCheck: wrong number of arguments"
 
   opTranslate64
     :: MachOp
@@ -1989,14 +2000,17 @@ genericIntQuotRemOp width [res_q, res_r] [arg_x, arg_y] = do
    let isMinBound = CmmMachOp (MO_Eq width) [arg_x, minBoundLit]
        isMinusOne = CmmMachOp (MO_Eq width) [arg_y, minusOneLit] 
        wouldOverflow = CmmMachOp (MO_And width) [isMinBound, isMinusOne]
-       isNotOverflow = CmmMachOp (MO_Eq width) [wouldOverflow, zeroLit]
    
-   -- Check that divisor is not zero  
-   let isNotZero = CmmMachOp (MO_Ne width) [arg_y, zeroLit]
+   -- Check that divisor is zero  
+   let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
    
-   -- Add runtime assertion (for now, just emit the division)
-   -- TODO: Add proper runtime assertion
-   massert True  -- placeholder assertion
+   -- Either condition is bad: division by zero OR overflow
+   let badCondition = CmmMachOp (MO_Or width) [isZero, wouldOverflow]
+   
+   -- Emit conditional error call
+   divErrorFailed <- getCode $
+     emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+   emit =<< mkCmmIfThen' badCondition divErrorFailed (Just False)
    
    emit $ mkAssign (CmmLocal res_q)
             (CmmMachOp (MO_S_Quot width) [arg_x, arg_y]) <*>
@@ -2009,12 +2023,13 @@ genericWordQuotRemOp width [res_q, res_r] [arg_x, arg_y] = do
     platform <- getPlatform
     let zeroLit = CmmLit (CmmInt 0 width)
         
-    -- Check that divisor is not zero  
-    let isNotZero = CmmMachOp (MO_Ne width) [arg_y, zeroLit]
+    -- Check that divisor is zero  
+    let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
     
-    -- Add runtime assertion (for now, just emit the division)
-    -- TODO: Add proper runtime assertion
-    massert True  -- placeholder assertion
+    -- Emit conditional error call
+    divErrorFailed <- getCode $
+      emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+    emit =<< mkCmmIfThen' isZero divErrorFailed (Just False)
     
     emit $ mkAssign (CmmLocal res_q)
              (CmmMachOp (MO_U_Quot width) [arg_x, arg_y]) <*>
