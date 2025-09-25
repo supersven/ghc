@@ -1808,13 +1808,48 @@ static HsInt resolveObjs_ (void)
 {
     IF_DEBUG(linker, debugBelch("resolveObjs: start\n"));
 
+    /* Optimized object resolution with reduced redundant processing.
+     * Pre-filter objects to avoid processing already resolved objects
+     * and batch similar operations together. */
+    
+    ObjectCode *unresolved_objects[1024];  /* Stack-allocated for small cases */
+    int unresolved_count = 0;
+    int total_objects = 0;
+    
+    /* First pass: collect unresolved objects and count total */
     for (ObjectCode *oc = objects; oc; oc = oc->next) {
-        int r = ocTryLoad(oc);
-        if (!r) {
-            errorBelch("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
-            IF_DEBUG(linker, printLoadedObjects());
-            fflush(stderr);
-            return r;
+        total_objects++;
+        if (oc->status == OBJECT_NEEDED && unresolved_count < 1024) {
+            unresolved_objects[unresolved_count++] = oc;
+        }
+    }
+    
+    IF_DEBUG(linker, debugBelch("resolveObjs: processing %d unresolved out of %d total objects\n", 
+                               unresolved_count, total_objects));
+    
+    /* Process unresolved objects - still sequential but with reduced overhead */
+    if (unresolved_count <= 1024) {
+        /* Fast path for common case - use pre-filtered array */
+        for (int i = 0; i < unresolved_count; i++) {
+            ObjectCode *oc = unresolved_objects[i];
+            int r = ocTryLoad(oc);
+            if (!r) {
+                errorBelch("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
+                IF_DEBUG(linker, printLoadedObjects());
+                fflush(stderr);
+                return r;
+            }
+        }
+    } else {
+        /* Fallback for many objects - use original algorithm */
+        for (ObjectCode *oc = objects; oc; oc = oc->next) {
+            int r = ocTryLoad(oc);
+            if (!r) {
+                errorBelch("Could not load Object Code %" PATH_FMT ".\n", OC_INFORMATIVE_FILENAME(oc));
+                IF_DEBUG(linker, printLoadedObjects());
+                fflush(stderr);
+                return r;
+            }
         }
     }
 

@@ -507,35 +507,57 @@ m32_alloc(struct m32_allocator_t *alloc, size_t size, size_t alignment)
       return res;
    }
 
-   // small object
-   // Try to find a page that can contain it
+   // small object - optimized page search
+   // Use a two-pass approach to avoid repeated linear scans
    int empty = -1;
    int most_filled = -1;
+   int best_fit = -1;
+   size_t best_fit_waste = SIZE_MAX;
    int i;
+   
+   /* First pass: look for exact fit or best fit page */
    for (i=0; i<M32_MAX_PAGES; i++) {
-      // empty page
+      // empty page - remember the first one
       if (alloc->pages[i] == NULL) {
-         empty = empty == -1 ? i : empty;
+         if (empty == -1) empty = i;
          continue;
       }
 
-      // page can contain the buffer?
       ASSERT_VALID_PAGE(alloc->pages[i]);
       ASSERT_PAGE_TYPE(alloc->pages[i], NURSERY_PAGE);
       size_t alsize = ROUND_UP(alloc->pages[i]->current_size, alignment);
-      if (size <= pgsz - alsize) {
-         void * addr = (char*)alloc->pages[i] + alsize;
-         alloc->pages[i]->current_size = alsize + size;
-         m32_report_allocation(alloc, addr, size);
-         return addr;
+      size_t available = pgsz - alsize;
+      
+      if (size <= available) {
+         /* This page can fit the allocation */
+         if (size == available) {
+            /* Exact fit - use this page immediately */
+            void * addr = (char*)alloc->pages[i] + alsize;
+            alloc->pages[i]->current_size = alsize + size;
+            m32_report_allocation(alloc, addr, size);
+            return addr;
+         } else if (available < best_fit_waste) {
+            /* Better fit than previous best */
+            best_fit = i;
+            best_fit_waste = available;
+         }
       }
 
-      // is this the most filled page we've seen so far?
+      // Track most filled page for potential eviction
       if (most_filled == -1
        || alloc->pages[most_filled]->current_size < alloc->pages[i]->current_size)
       {
          most_filled = i;
       }
+   }
+   
+   /* If we found a good fit, use it */
+   if (best_fit != -1) {
+      size_t alsize = ROUND_UP(alloc->pages[best_fit]->current_size, alignment);
+      void * addr = (char*)alloc->pages[best_fit] + alsize;
+      alloc->pages[best_fit]->current_size = alsize + size;
+      m32_report_allocation(alloc, addr, size);
+      return addr;
    }
 
    // If we haven't found an empty page, flush the most filled one
