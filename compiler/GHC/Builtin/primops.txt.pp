@@ -414,11 +414,17 @@ primop Word8ToInt8Op "word8ToInt8#" GenPrimOp Word8# -> Int8#
    with code_size = 0
 
 primop Word8EqOp "eqWord8#" Compare Word8# -> Word8# -> Int#
+   {Relates to @==@ in the interpreter.}
 primop Word8GeOp "geWord8#" Compare Word8# -> Word8# -> Int#
+   {Relates to @>=@ in the interpreter.}
 primop Word8GtOp "gtWord8#" Compare Word8# -> Word8# -> Int#
+   {Relates to @>@ in the interpreter.}
 primop Word8LeOp "leWord8#" Compare Word8# -> Word8# -> Int#
+   {Relates to @<=@ in the interpreter.}
 primop Word8LtOp "ltWord8#" Compare Word8# -> Word8# -> Int#
+   {Relates to @<@ in the interpreter.}
 primop Word8NeOp "neWord8#" Compare Word8# -> Word8# -> Int#
+   {Relates to @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Int16#"
@@ -431,14 +437,18 @@ primop Int16ToIntOp "int16ToInt#" GenPrimOp Int16# -> Int#
 primop IntToInt16Op "intToInt16#" GenPrimOp Int# -> Int16#
 
 primop Int16NegOp "negateInt16#" GenPrimOp Int16# -> Int16#
+   {Relates to @-@ in the interpreter.}
 
 primop Int16AddOp "plusInt16#" GenPrimOp Int16# -> Int16# -> Int16#
+  {Relates to @+@ in the interpreter.}
   with
     commutable = True
 
 primop Int16SubOp "subInt16#" GenPrimOp Int16# -> Int16# -> Int16#
+   {Relates to @-@ in the interpreter.}
 
 primop Int16MulOp "timesInt16#" GenPrimOp Int16# -> Int16# -> Int16#
+  {Relates to @*@ in the interpreter.}
   with
     commutable = True
 
@@ -458,14 +468,17 @@ primop Int16QuotRemOp "quotRemInt16#" GenPrimOp Int16# -> Int16# -> (# Int16#, I
     div_like = True
 
 primop Int16SllOp "uncheckedShiftLInt16#"  GenPrimOp Int16# -> Int# -> Int16#
+  {Relates to @<<@ in the interpreter.}
   with
     shift_like = True
 
 primop Int16SraOp "uncheckedShiftRAInt16#" GenPrimOp Int16# -> Int# -> Int16#
+  {Relates to @>>@ in the interpreter.}
   with
     shift_like = True
 
 primop Int16SrlOp "uncheckedShiftRLInt16#" GenPrimOp Int16# -> Int# -> Int16#
+  {Relates to @>>@ in the interpreter.}
   with
     shift_like = True
 
@@ -473,11 +486,17 @@ primop Int16ToWord16Op "int16ToWord16#" GenPrimOp Int16# -> Word16#
    with code_size = 0
 
 primop Int16EqOp "eqInt16#" Compare Int16# -> Int16# -> Int#
+   {Relates to @==@ in the interpreter.}
 primop Int16GeOp "geInt16#" Compare Int16# -> Int16# -> Int#
+   {Relates to @>=@ in the interpreter.}
 primop Int16GtOp "gtInt16#" Compare Int16# -> Int16# -> Int#
+   {Relates to @>@ in the interpreter.}
 primop Int16LeOp "leInt16#" Compare Int16# -> Int16# -> Int#
+   {Relates to @<=@ in the interpreter.}
 primop Int16LtOp "ltInt16#" Compare Int16# -> Int16# -> Int#
+   {Relates to @<@ in the interpreter.}
 primop Int16NeOp "neInt16#" Compare Int16# -> Int16# -> Int#
+   {Relates to @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Word16#"
@@ -490,12 +509,15 @@ primop Word16ToWordOp "word16ToWord#" GenPrimOp Word16# -> Word#
 primop WordToWord16Op "wordToWord16#" GenPrimOp Word# -> Word16#
 
 primop Word16AddOp "plusWord16#" GenPrimOp Word16# -> Word16# -> Word16#
+  {Relates to @+@ in the interpreter.}
   with
     commutable = True
 
 primop Word16SubOp "subWord16#" GenPrimOp Word16# -> Word16# -> Word16#
+   {Relates to @-@ in the interpreter.}
 
 primop Word16MulOp "timesWord16#" GenPrimOp Word16# -> Word16# -> Word16#
+  {Relates to @*@ in the interpreter.}
   with
     commutable = True
 
@@ -515,15 +537,19 @@ primop Word16QuotRemOp "quotRemWord16#" GenPrimOp Word16# -> Word16# -> (# Word1
     div_like = True
 
 primop Word16AndOp "andWord16#" GenPrimOp Word16# -> Word16# -> Word16#
+   {Relates to @&@ in the interpreter.}
    with commutable = True
 
 primop Word16OrOp "orWord16#" GenPrimOp Word16# -> Word16# -> Word16#
+   {Relates to @|@ in the interpreter.}
    with commutable = True
 
 primop Word16XorOp "xorWord16#" GenPrimOp Word16# -> Word16# -> Word16#
+   {Relates to @^@ in the interpreter.}
    with commutable = True
 
 primop Word16NotOp "notWord16#" GenPrimOp Word16# -> Word16#
+   {Relates to @~@ in the interpreter.}
 
 primop Word16SllOp "uncheckedShiftLWord16#"  GenPrimOp Word16# -> Int# -> Word16#
   with
