@@ -1,0 +1,56 @@
+#include "Cmm.h"
+
+// Comprehensive Cmm test for div_like operations
+// Tests multiple integer sizes and operations
+
+// Test 8-bit signed operations
+testQuotInt8(bits8 x, bits8 y) {
+    bits8 result;
+    result = %quot(x, y);
+    return (%zx64(result));
+}
+
+testRemInt8(bits8 x, bits8 y) {
+    bits8 result;
+    result = %rem(x, y);
+    return (%zx64(result));
+}
+
+// Test 8-bit unsigned operations  
+testQuotWord8(bits8 x, bits8 y) {
+    bits8 result;
+    result = %quot(x, y);
+    return (%zx64(result));
+}
+
+testRemWord8(bits8 x, bits8 y) {
+    bits8 result;
+    result = %rem(x, y);
+    return (%zx64(result));
+}
+
+// Test 16-bit signed operations
+testQuotInt16(bits16 x, bits16 y) {
+    bits16 result;
+    result = %quot(x, y);
+    return (%zx64(result));
+}
+
+testRemInt16(bits16 x, bits16 y) {
+    bits16 result;
+    result = %rem(x, y);
+    return (%zx64(result));
+}
+
+// Test 32-bit signed operations
+testQuotInt32(bits32 x, bits32 y) {
+    bits32 result;
+    result = %quot(x, y);
+    return (%zx64(result));
+}
+
+testRemInt32(bits32 x, bits32 y) {
+    bits32 result;
+    result = %rem(x, y);
+    return (%zx64(result));
+}

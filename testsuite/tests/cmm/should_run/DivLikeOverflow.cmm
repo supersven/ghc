@@ -1,0 +1,9 @@
+#include "Cmm.h"
+
+// Test integer overflow case  
+testQuotInt8Overflow() {
+    bits8 result;
+    // -128 / -1 should trigger overflow assertion
+    result = %quot((-128)::bits8, (-1)::bits8);
+    return (%zx64(result));
+}
