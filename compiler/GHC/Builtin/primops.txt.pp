@@ -285,14 +285,18 @@ primop Int8ToIntOp "int8ToInt#" GenPrimOp Int8# -> Int#
 primop IntToInt8Op "intToInt8#" GenPrimOp Int# -> Int8#
 
 primop Int8NegOp "negateInt8#" GenPrimOp Int8# -> Int8#
+   {Relates to @-@ in the interpreter.}
 
 primop Int8AddOp "plusInt8#" GenPrimOp Int8# -> Int8# -> Int8#
+  {Relates to @+@ in the interpreter.}
   with
     commutable = True
 
 primop Int8SubOp "subInt8#" GenPrimOp Int8# -> Int8# -> Int8#
+   {Relates to @-@ in the interpreter.}
 
 primop Int8MulOp "timesInt8#" GenPrimOp Int8# -> Int8# -> Int8#
+  {Relates to @*@ in the interpreter.}
   with
     commutable = True
 
@@ -313,14 +317,17 @@ primop Int8QuotRemOp "quotRemInt8#" GenPrimOp Int8# -> Int8# -> (# Int8#, Int8# 
     div_like = True
 
 primop Int8SllOp "uncheckedShiftLInt8#"  GenPrimOp Int8# -> Int# -> Int8#
+  {Relates to @<<@ in the interpreter.}
   with
     shift_like = True
 
 primop Int8SraOp "uncheckedShiftRAInt8#" GenPrimOp Int8# -> Int# -> Int8#
+  {Relates to @>>@ in the interpreter.}
   with
     shift_like = True
 
 primop Int8SrlOp "uncheckedShiftRLInt8#" GenPrimOp Int8# -> Int# -> Int8#
+  {Relates to @>>@ in the interpreter.}
   with
     shift_like = True
 
@@ -328,11 +335,17 @@ primop Int8ToWord8Op "int8ToWord8#" GenPrimOp Int8# -> Word8#
    with code_size = 0
 
 primop Int8EqOp "eqInt8#" Compare Int8# -> Int8# -> Int#
+   {Relates to @==@ in the interpreter.}
 primop Int8GeOp "geInt8#" Compare Int8# -> Int8# -> Int#
+   {Relates to @>=@ in the interpreter.}
 primop Int8GtOp "gtInt8#" Compare Int8# -> Int8# -> Int#
+   {Relates to @>@ in the interpreter.}
 primop Int8LeOp "leInt8#" Compare Int8# -> Int8# -> Int#
+   {Relates to @<=@ in the interpreter.}
 primop Int8LtOp "ltInt8#" Compare Int8# -> Int8# -> Int#
+   {Relates to @<@ in the interpreter.}
 primop Int8NeOp "neInt8#" Compare Int8# -> Int8# -> Int#
+   {Relates to @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Word8#"
@@ -345,12 +358,15 @@ primop Word8ToWordOp "word8ToWord#" GenPrimOp Word8# -> Word#
 primop WordToWord8Op "wordToWord8#" GenPrimOp Word# -> Word8#
 
 primop Word8AddOp "plusWord8#" GenPrimOp Word8# -> Word8# -> Word8#
+  {Relates to @+@ in the interpreter.}
   with
     commutable = True
 
 primop Word8SubOp "subWord8#" GenPrimOp Word8# -> Word8# -> Word8#
+   {Relates to @-@ in the interpreter.}
 
 primop Word8MulOp "timesWord8#" GenPrimOp Word8# -> Word8# -> Word8#
+  {Relates to @*@ in the interpreter.}
   with
     commutable = True
 
@@ -370,21 +386,27 @@ primop Word8QuotRemOp "quotRemWord8#" GenPrimOp Word8# -> Word8# -> (# Word8#, W
     div_like = True
 
 primop Word8AndOp "andWord8#" GenPrimOp Word8# -> Word8# -> Word8#
+   {Relates to @&@ in the interpreter.}
    with commutable = True
 
 primop Word8OrOp "orWord8#" GenPrimOp Word8# -> Word8# -> Word8#
+   {Relates to @|@ in the interpreter.}
    with commutable = True
 
 primop Word8XorOp "xorWord8#" GenPrimOp Word8# -> Word8# -> Word8#
+   {Relates to @^@ in the interpreter.}
    with commutable = True
 
 primop Word8NotOp "notWord8#" GenPrimOp Word8# -> Word8#
+   {Relates to @~@ in the interpreter.}
 
 primop Word8SllOp "uncheckedShiftLWord8#"  GenPrimOp Word8# -> Int# -> Word8#
+  {Relates to @<<@ in the interpreter.}
   with
     shift_like = True
 
 primop Word8SrlOp "uncheckedShiftRLWord8#" GenPrimOp Word8# -> Int# -> Word8#
+  {Relates to @>>@ in the interpreter.}
   with
     shift_like = True
 
@@ -766,15 +788,17 @@ primtype Int#
 
 primop   IntAddOp    "+#"    GenPrimOp
    Int# -> Int# -> Int#
+   {Relates to @+@ in the interpreter.}
    with commutable = True
         fixity = infixl 6
 
 primop   IntSubOp    "-#"    GenPrimOp   Int# -> Int# -> Int#
+   {Relates to @-@ in the interpreter.}
    with fixity = infixl 6
 
 primop   IntMulOp    "*#"
    GenPrimOp   Int# -> Int# -> Int#
-   {Low word of signed integer multiply.}
+   {Low word of signed integer multiply. Relates to @*@ in the interpreter.}
    with commutable = True
         fixity = infixl 7
 
@@ -832,22 +856,22 @@ primop   IntQuotRemOp "quotRemInt#"    GenPrimOp
         div_like = True
 
 primop   IntAndOp   "andI#"   GenPrimOp    Int# -> Int# -> Int#
-   {Bitwise "and".}
+   {Bitwise "and". Relates to @&@ in the interpreter.}
    with commutable = True
 
 primop   IntOrOp   "orI#"     GenPrimOp    Int# -> Int# -> Int#
-   {Bitwise "or".}
+   {Bitwise "or". Relates to @|@ in the interpreter.}
    with commutable = True
 
 primop   IntXorOp   "xorI#"   GenPrimOp    Int# -> Int# -> Int#
-   {Bitwise "xor".}
+   {Bitwise "xor". Relates to @^@ in the interpreter.}
    with commutable = True
 
 primop   IntNotOp   "notI#"   GenPrimOp   Int# -> Int#
-   {Bitwise "not", also known as the binary complement.}
+   {Bitwise "not", also known as the binary complement. Relates to @~@ in the interpreter.}
 
 primop   IntNegOp    "negateInt#"    GenPrimOp   Int# -> Int#
-   {Unary negation.
+   {Unary negation. Relates to @-@ in the interpreter.
     Since the negative 'Int#' range extends one further than the
     positive range, 'negateInt#' of the most negative number is an
     identity operation. This way, 'negateInt#' is always its own inverse.}
@@ -870,25 +894,31 @@ primop   IntSubCOp   "subIntC#"    GenPrimOp   Int# -> Int# -> (# Int#, Int# #)
    with code_size = 2
 
 primop   IntGtOp  ">#"   Compare   Int# -> Int# -> Int#
+   {Relates to @>@ in the interpreter.}
    with fixity = infix 4
 
 primop   IntGeOp  ">=#"   Compare   Int# -> Int# -> Int#
+   {Relates to @>=@ in the interpreter.}
    with fixity = infix 4
 
 primop   IntEqOp  "==#"   Compare
    Int# -> Int# -> Int#
+   {Relates to @==@ in the interpreter.}
    with commutable = True
         fixity = infix 4
 
 primop   IntNeOp  "/=#"   Compare
    Int# -> Int# -> Int#
+   {Relates to @!=@ in the interpreter.}
    with commutable = True
         fixity = infix 4
 
 primop   IntLtOp  "<#"   Compare   Int# -> Int# -> Int#
+   {Relates to @<@ in the interpreter.}
    with fixity = infix 4
 
 primop   IntLeOp  "<=#"   Compare   Int# -> Int# -> Int#
+   {Relates to @<=@ in the interpreter.}
    with fixity = infix 4
 
 primop   ChrOp   "chr#"   GenPrimOp   Int# -> Char#
@@ -916,19 +946,19 @@ primop   WordToDoubleOp   "word2Double#"          GenPrimOp  Word# -> Double#
     @'word2Double#' 1## == 1.0##@}
 
 primop   IntSllOp   "uncheckedIShiftL#" GenPrimOp  Int# -> Int# -> Int#
-         {Shift left.  Result undefined if shift amount is not
+         {Shift left. Relates to @<<@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
 
 primop   IntSraOp   "uncheckedIShiftRA#" GenPrimOp Int# -> Int# -> Int#
-         {Shift right arithmetic.  Result undefined if shift amount is not
+         {Shift right arithmetic. Relates to @>>@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
 
 primop   IntSrlOp   "uncheckedIShiftRL#" GenPrimOp Int# -> Int# -> Int#
-         {Shift right logical.  Result undefined if shift amount is not
+         {Shift right logical. Relates to @>>@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
@@ -941,6 +971,7 @@ section "Word#"
 primtype Word#
 
 primop   WordAddOp   "plusWord#"   GenPrimOp   Word# -> Word# -> Word#
+   {Relates to @+@ in the interpreter.}
    with commutable = True
 
 primop   WordAddCOp   "addWordC#"   GenPrimOp   Word# -> Word# -> (# Word#, Int# #)
@@ -964,8 +995,10 @@ primop   WordAdd2Op   "plusWord2#"   GenPrimOp   Word# -> Word# -> (# Word#, Wor
         commutable = True
 
 primop   WordSubOp   "minusWord#"   GenPrimOp   Word# -> Word# -> Word#
+   {Relates to @-@ in the interpreter.}
 
 primop   WordMulOp   "timesWord#"   GenPrimOp   Word# -> Word# -> Word#
+   {Relates to @*@ in the interpreter.}
    with commutable = True
 
 -- Returns (# high, low #)
@@ -994,24 +1027,28 @@ primop   WordQuotRem2Op "quotRemWord2#" GenPrimOp
         div_like = True
 
 primop   WordAndOp   "and#"   GenPrimOp   Word# -> Word# -> Word#
+   {Relates to @&@ in the interpreter.}
    with commutable = True
 
 primop   WordOrOp   "or#"   GenPrimOp   Word# -> Word# -> Word#
+   {Relates to @|@ in the interpreter.}
    with commutable = True
 
 primop   WordXorOp   "xor#"   GenPrimOp   Word# -> Word# -> Word#
+   {Relates to @^@ in the interpreter.}
    with commutable = True
 
 primop   WordNotOp   "not#"   GenPrimOp   Word# -> Word#
+   {Relates to @~@ in the interpreter.}
 
 primop   WordSllOp   "uncheckedShiftL#"   GenPrimOp   Word# -> Int# -> Word#
-         {Shift left logical.   Result undefined if shift amount is not
+         {Shift left logical. Relates to @<<@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
 
 primop   WordSrlOp   "uncheckedShiftRL#"   GenPrimOp   Word# -> Int# -> Word#
-         {Shift right logical.   Result undefined if shift  amount is not
+         {Shift right logical. Relates to @>>@ in the interpreter. Result undefined if shift  amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
@@ -1020,11 +1057,17 @@ primop   WordToIntOp   "word2Int#"   GenPrimOp   Word# -> Int#
    with code_size = 0
 
 primop   WordGtOp   "gtWord#"   Compare   Word# -> Word# -> Int#
+   {Relates to @>@ in the interpreter.}
 primop   WordGeOp   "geWord#"   Compare   Word# -> Word# -> Int#
+   {Relates to @>=@ in the interpreter.}
 primop   WordEqOp   "eqWord#"   Compare   Word# -> Word# -> Int#
+   {Relates to @==@ in the interpreter.}
 primop   WordNeOp   "neWord#"   Compare   Word# -> Word# -> Int#
+   {Relates to @!=@ in the interpreter.}
 primop   WordLtOp   "ltWord#"   Compare   Word# -> Word# -> Int#
+   {Relates to @<@ in the interpreter.}
 primop   WordLeOp   "leWord#"   Compare   Word# -> Word# -> Int#
+   {Relates to @<=@ in the interpreter.}
 
 primop   PopCnt8Op   "popCnt8#"   GenPrimOp   Word# -> Word#
     {Count the number of set bits in the lower 8 bits of a word.}
