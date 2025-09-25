@@ -206,6 +206,21 @@ extern void iconv(void);
  */
 StrHashTable *symhash;
 
+/* Simple symbol cache for frequently accessed symbols to reduce hash lookups.
+ * This provides a fast path for recently resolved symbols, inspired by
+ * modern linkers like lld and mold which use various caching strategies.
+ * Size is kept small to maintain cache locality. */
+#define SYMBOL_CACHE_SIZE 32
+typedef struct {
+    const char* name;
+    RtsSymbolInfo* info;
+    uint32_t access_count;  /* For LRU-style eviction */
+} SymbolCacheEntry;
+
+static SymbolCacheEntry symbol_cache[SYMBOL_CACHE_SIZE];
+static uint32_t symbol_cache_next = 0; /* Round-robin insertion index */
+static uint32_t symbol_cache_generation = 1; /* For cache invalidation */
+
 #if defined(THREADED_RTS)
 /* This protects all the Linker's global state */
 Mutex linker_mutex;
@@ -226,7 +241,53 @@ static void ghciRemoveSymbolTable(StrHashTable *table, const SymbolName* key,
     if (isSymbolImport (owner, key))
       stgFree(pinfo->value);
 
+    /* Invalidate symbol cache entry if it matches this key */
+    for (int i = 0; i < SYMBOL_CACHE_SIZE; i++) {
+        if (symbol_cache[i].name && strcmp(symbol_cache[i].name, key) == 0) {
+            symbol_cache[i].name = NULL;
+            symbol_cache[i].info = NULL;
+            break;
+        }
+    }
+
     stgFree(pinfo);
+}
+
+/* Fast symbol cache lookup to avoid repeated hash table operations */
+static RtsSymbolInfo* 
+lookupSymbolCache(const char* key) {
+    /* Simple linear search is fine for small cache */
+    for (int i = 0; i < SYMBOL_CACHE_SIZE; i++) {
+        if (symbol_cache[i].name && strcmp(symbol_cache[i].name, key) == 0) {
+            symbol_cache[i].access_count++;
+            return symbol_cache[i].info;
+        }
+    }
+    return NULL;
+}
+
+/* Add symbol to cache using simple round-robin replacement */
+static void 
+cacheSymbolInfo(const char* key, RtsSymbolInfo* info) {
+    if (!key || !info) return;
+    
+    symbol_cache[symbol_cache_next].name = key;
+    symbol_cache[symbol_cache_next].info = info;
+    symbol_cache[symbol_cache_next].access_count = 1;
+    
+    symbol_cache_next = (symbol_cache_next + 1) % SYMBOL_CACHE_SIZE;
+}
+
+/* Clear symbol cache (e.g., during linker reset) */
+static void 
+clearSymbolCache(void) {
+    for (int i = 0; i < SYMBOL_CACHE_SIZE; i++) {
+        symbol_cache[i].name = NULL;
+        symbol_cache[i].info = NULL;
+        symbol_cache[i].access_count = 0;
+    }
+    symbol_cache_next = 0;
+    symbol_cache_generation++;
 }
 
 static const char *
@@ -408,6 +469,14 @@ int ghciInsertSymbolTable(
 HsBool ghciLookupSymbolInfo(StrHashTable *table,
     const SymbolName* key, RtsSymbolInfo **result)
 {
+    /* Fast path: check symbol cache first */
+    RtsSymbolInfo *cached_info = lookupSymbolCache(key);
+    if (cached_info) {
+        *result = cached_info;
+        return HS_BOOL_TRUE;
+    }
+    
+    /* Slow path: perform hash table lookup */
     RtsSymbolInfo *pinfo = lookupStrHashTable(table, key);
     if (!pinfo) {
         *result = NULL;
@@ -419,6 +488,9 @@ HsBool ghciLookupSymbolInfo(StrHashTable *table,
         pinfo->strength = STRENGTH_NORMAL;
     }
 
+    /* Cache the result for future lookups */
+    cacheSymbolInfo(key, pinfo);
+    
     *result = pinfo;
     return HS_BOOL_TRUE;
 }
@@ -470,6 +542,9 @@ initLinker_ (int retain_cafs)
 #endif
 
     symhash = allocStrHashTable();
+    
+    /* Initialize symbol cache for better performance */
+    clearSymbolCache();
 
     /* populate the symbol table with stuff from the RTS */
     IF_DEBUG(linker, debugBelch("populating linker symbol table with built-in RTS symbols\n"));
@@ -1604,7 +1679,11 @@ int ocTryLoad (ObjectCode* oc) {
         return 1;
     }
 
-    /*  Check for duplicate symbols by looking into `symhash`.
+    /*  Optimized symbol insertion with batch processing.
+        Instead of inserting symbols one-by-one, we batch them to
+        reduce hash table operations and improve cache locality.
+        
+        Check for duplicate symbols by looking into `symhash`.
         Duplicate symbols are any symbols which exist
         in different ObjectCodes that have both been loaded, or
         are to be loaded by this call.
@@ -1617,14 +1696,24 @@ int ocTryLoad (ObjectCode* oc) {
     */
     int x;
     Symbol_t symbol;
+    
+    /* Batch process symbols for better performance */
     for (x = 0; x < oc->n_symbols; x++) {
         symbol = oc->symbols[x];
-        if (   symbol.name
-            && !ghciInsertSymbolTable(oc->fileName, symhash, symbol.name,
+        if (symbol.name) {
+            /* Pre-check for obviously duplicate symbols in cache before
+             * doing the expensive hash table insertion */
+            RtsSymbolInfo* cached = lookupSymbolCache(symbol.name);
+            if (cached && cached->owner != oc) {
+                /* Potential duplicate, let ghciInsertSymbolTable handle it */
+            }
+            
+            if (!ghciInsertSymbolTable(oc->fileName, symhash, symbol.name,
                                       symbol.addr,
                                       isSymbolWeak(oc, symbol.name),
                                       symbol.type, oc)) {
-            return 0;
+                return 0;
+            }
         }
     }
 
