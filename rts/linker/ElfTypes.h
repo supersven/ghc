@@ -173,6 +173,7 @@ struct SectionFormatInfo {
     size_t stub_size;
     size_t nstubs;
     Stub * stubs;
+    Stub * stubs_tail;  /* Optimization: maintain tail pointer for O(1) stub insertion */
 
     const char * name;
 

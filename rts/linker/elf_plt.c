@@ -63,14 +63,18 @@ makeStub(Section * section,
     if((*_makeStub)(s))
         return EXIT_FAILURE;
 
+    /* Optimized O(1) stub insertion using tail pointer */
     if(section->info->stubs == NULL) {
         ASSERT(section->info->nstubs == 0);
         /* no stubs yet, let's just create this one */
         section->info->stubs = s;
+        section->info->stubs_tail = s;
     } else {
-        Stub * tail = section->info->stubs;
-        while(tail->next != NULL) tail = tail->next;
-        tail->next = s;
+        /* Use tail pointer for O(1) insertion instead of O(n) traversal */
+        ASSERT(section->info->stubs_tail != NULL);
+        ASSERT(section->info->stubs_tail->next == NULL);
+        section->info->stubs_tail->next = s;
+        section->info->stubs_tail = s;
     }
     section->info->nstubs += 1;
     *addr = s->addr;
@@ -87,7 +91,9 @@ freeStubs(Section * section) {
         last = last->next;
         free(t);
     }
+    free(last);  /* Free the final stub */
     section->info->stubs = NULL;
+    section->info->stubs_tail = NULL;  /* Clear tail pointer */
     section->info->nstubs = 0;
 }
 
