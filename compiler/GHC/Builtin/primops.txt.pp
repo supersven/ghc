@@ -285,18 +285,18 @@ primop Int8ToIntOp "int8ToInt#" GenPrimOp Int8# -> Int#
 primop IntToInt8Op "intToInt8#" GenPrimOp Int# -> Int8#
 
 primop Int8NegOp "negateInt8#" GenPrimOp Int8# -> Int8#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int8AddOp "plusInt8#" GenPrimOp Int8# -> Int8# -> Int8#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
   with
     commutable = True
 
 primop Int8SubOp "subInt8#" GenPrimOp Int8# -> Int8# -> Int8#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int8MulOp "timesInt8#" GenPrimOp Int8# -> Int8# -> Int8#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
   with
     commutable = True
 
@@ -317,17 +317,17 @@ primop Int8QuotRemOp "quotRemInt8#" GenPrimOp Int8# -> Int8# -> (# Int8#, Int8# 
     div_like = True
 
 primop Int8SllOp "uncheckedShiftLInt8#"  GenPrimOp Int8# -> Int# -> Int8#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
   with
     shift_like = True
 
 primop Int8SraOp "uncheckedShiftRAInt8#" GenPrimOp Int8# -> Int# -> Int8#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
   with
     shift_like = True
 
 primop Int8SrlOp "uncheckedShiftRLInt8#" GenPrimOp Int8# -> Int# -> Int8#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
   with
     shift_like = True
 
@@ -335,17 +335,17 @@ primop Int8ToWord8Op "int8ToWord8#" GenPrimOp Int8# -> Word8#
    with code_size = 0
 
 primop Int8EqOp "eqInt8#" Compare Int8# -> Int8# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Int8GeOp "geInt8#" Compare Int8# -> Int8# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Int8GtOp "gtInt8#" Compare Int8# -> Int8# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Int8LeOp "leInt8#" Compare Int8# -> Int8# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Int8LtOp "ltInt8#" Compare Int8# -> Int8# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Int8NeOp "neInt8#" Compare Int8# -> Int8# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Word8#"
@@ -358,15 +358,15 @@ primop Word8ToWordOp "word8ToWord#" GenPrimOp Word8# -> Word#
 primop WordToWord8Op "wordToWord8#" GenPrimOp Word# -> Word8#
 
 primop Word8AddOp "plusWord8#" GenPrimOp Word8# -> Word8# -> Word8#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
   with
     commutable = True
 
 primop Word8SubOp "subWord8#" GenPrimOp Word8# -> Word8# -> Word8#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Word8MulOp "timesWord8#" GenPrimOp Word8# -> Word8# -> Word8#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
   with
     commutable = True
 
@@ -386,27 +386,27 @@ primop Word8QuotRemOp "quotRemWord8#" GenPrimOp Word8# -> Word8# -> (# Word8#, W
     div_like = True
 
 primop Word8AndOp "andWord8#" GenPrimOp Word8# -> Word8# -> Word8#
-   {Relates to C @&@ in the interpreter.}
+   {Relates to C operator @&@ in the interpreter.}
    with commutable = True
 
 primop Word8OrOp "orWord8#" GenPrimOp Word8# -> Word8# -> Word8#
-   {Relates to C @|@ in the interpreter.}
+   {Relates to C operator @|@ in the interpreter.}
    with commutable = True
 
 primop Word8XorOp "xorWord8#" GenPrimOp Word8# -> Word8# -> Word8#
-   {Relates to C @^@ in the interpreter.}
+   {Relates to C operator @^@ in the interpreter.}
    with commutable = True
 
 primop Word8NotOp "notWord8#" GenPrimOp Word8# -> Word8#
-   {Relates to C @~@ in the interpreter.}
+   {Relates to C operator @~@ in the interpreter.}
 
 primop Word8SllOp "uncheckedShiftLWord8#"  GenPrimOp Word8# -> Int# -> Word8#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
   with
     shift_like = True
 
 primop Word8SrlOp "uncheckedShiftRLWord8#" GenPrimOp Word8# -> Int# -> Word8#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
   with
     shift_like = True
 
@@ -414,17 +414,17 @@ primop Word8ToInt8Op "word8ToInt8#" GenPrimOp Word8# -> Int8#
    with code_size = 0
 
 primop Word8EqOp "eqWord8#" Compare Word8# -> Word8# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Word8GeOp "geWord8#" Compare Word8# -> Word8# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Word8GtOp "gtWord8#" Compare Word8# -> Word8# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Word8LeOp "leWord8#" Compare Word8# -> Word8# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Word8LtOp "ltWord8#" Compare Word8# -> Word8# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Word8NeOp "neWord8#" Compare Word8# -> Word8# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Int16#"
@@ -437,18 +437,18 @@ primop Int16ToIntOp "int16ToInt#" GenPrimOp Int16# -> Int#
 primop IntToInt16Op "intToInt16#" GenPrimOp Int# -> Int16#
 
 primop Int16NegOp "negateInt16#" GenPrimOp Int16# -> Int16#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int16AddOp "plusInt16#" GenPrimOp Int16# -> Int16# -> Int16#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
   with
     commutable = True
 
 primop Int16SubOp "subInt16#" GenPrimOp Int16# -> Int16# -> Int16#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int16MulOp "timesInt16#" GenPrimOp Int16# -> Int16# -> Int16#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
   with
     commutable = True
 
@@ -468,17 +468,17 @@ primop Int16QuotRemOp "quotRemInt16#" GenPrimOp Int16# -> Int16# -> (# Int16#, I
     div_like = True
 
 primop Int16SllOp "uncheckedShiftLInt16#"  GenPrimOp Int16# -> Int# -> Int16#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
   with
     shift_like = True
 
 primop Int16SraOp "uncheckedShiftRAInt16#" GenPrimOp Int16# -> Int# -> Int16#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
   with
     shift_like = True
 
 primop Int16SrlOp "uncheckedShiftRLInt16#" GenPrimOp Int16# -> Int# -> Int16#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
   with
     shift_like = True
 
@@ -486,17 +486,17 @@ primop Int16ToWord16Op "int16ToWord16#" GenPrimOp Int16# -> Word16#
    with code_size = 0
 
 primop Int16EqOp "eqInt16#" Compare Int16# -> Int16# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Int16GeOp "geInt16#" Compare Int16# -> Int16# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Int16GtOp "gtInt16#" Compare Int16# -> Int16# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Int16LeOp "leInt16#" Compare Int16# -> Int16# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Int16LtOp "ltInt16#" Compare Int16# -> Int16# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Int16NeOp "neInt16#" Compare Int16# -> Int16# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Word16#"
@@ -509,15 +509,15 @@ primop Word16ToWordOp "word16ToWord#" GenPrimOp Word16# -> Word#
 primop WordToWord16Op "wordToWord16#" GenPrimOp Word# -> Word16#
 
 primop Word16AddOp "plusWord16#" GenPrimOp Word16# -> Word16# -> Word16#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
   with
     commutable = True
 
 primop Word16SubOp "subWord16#" GenPrimOp Word16# -> Word16# -> Word16#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Word16MulOp "timesWord16#" GenPrimOp Word16# -> Word16# -> Word16#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
   with
     commutable = True
 
@@ -537,19 +537,19 @@ primop Word16QuotRemOp "quotRemWord16#" GenPrimOp Word16# -> Word16# -> (# Word1
     div_like = True
 
 primop Word16AndOp "andWord16#" GenPrimOp Word16# -> Word16# -> Word16#
-   {Relates to C @&@ in the interpreter.}
+   {Relates to C operator @&@ in the interpreter.}
    with commutable = True
 
 primop Word16OrOp "orWord16#" GenPrimOp Word16# -> Word16# -> Word16#
-   {Relates to C @|@ in the interpreter.}
+   {Relates to C operator @|@ in the interpreter.}
    with commutable = True
 
 primop Word16XorOp "xorWord16#" GenPrimOp Word16# -> Word16# -> Word16#
-   {Relates to C @^@ in the interpreter.}
+   {Relates to C operator @^@ in the interpreter.}
    with commutable = True
 
 primop Word16NotOp "notWord16#" GenPrimOp Word16# -> Word16#
-   {Relates to C @~@ in the interpreter.}
+   {Relates to C operator @~@ in the interpreter.}
 
 primop Word16SllOp "uncheckedShiftLWord16#"  GenPrimOp Word16# -> Int# -> Word16#
   with
@@ -580,18 +580,18 @@ primop Int32ToIntOp "int32ToInt#" GenPrimOp Int32# -> Int#
 primop IntToInt32Op "intToInt32#" GenPrimOp Int# -> Int32#
 
 primop Int32NegOp "negateInt32#" GenPrimOp Int32# -> Int32#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int32AddOp "plusInt32#" GenPrimOp Int32# -> Int32# -> Int32#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
    with
     commutable = True
 
 primop Int32SubOp "subInt32#" GenPrimOp Int32# -> Int32# -> Int32#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int32MulOp "timesInt32#" GenPrimOp Int32# -> Int32# -> Int32#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
    with
     commutable = True
 
@@ -611,17 +611,17 @@ primop Int32QuotRemOp "quotRemInt32#" GenPrimOp Int32# -> Int32# -> (# Int32#, I
     div_like = True
 
 primop Int32SllOp "uncheckedShiftLInt32#"  GenPrimOp Int32# -> Int# -> Int32#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
    with
     shift_like = True
 
 primop Int32SraOp "uncheckedShiftRAInt32#" GenPrimOp Int32# -> Int# -> Int32#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
    with
     shift_like = True
 
 primop Int32SrlOp "uncheckedShiftRLInt32#" GenPrimOp Int32# -> Int# -> Int32#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
    with
     shift_like = True
 
@@ -629,17 +629,17 @@ primop Int32ToWord32Op "int32ToWord32#" GenPrimOp Int32# -> Word32#
    with code_size = 0
 
 primop Int32EqOp "eqInt32#" Compare Int32# -> Int32# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Int32GeOp "geInt32#" Compare Int32# -> Int32# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Int32GtOp "gtInt32#" Compare Int32# -> Int32# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Int32LeOp "leInt32#" Compare Int32# -> Int32# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Int32LtOp "ltInt32#" Compare Int32# -> Int32# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Int32NeOp "neInt32#" Compare Int32# -> Int32# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Word32#"
@@ -652,15 +652,15 @@ primop Word32ToWordOp "word32ToWord#" GenPrimOp Word32# -> Word#
 primop WordToWord32Op "wordToWord32#" GenPrimOp Word# -> Word32#
 
 primop Word32AddOp "plusWord32#" GenPrimOp Word32# -> Word32# -> Word32#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
    with
     commutable = True
 
 primop Word32SubOp "subWord32#" GenPrimOp Word32# -> Word32# -> Word32#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Word32MulOp "timesWord32#" GenPrimOp Word32# -> Word32# -> Word32#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
    with
     commutable = True
 
@@ -680,27 +680,27 @@ primop Word32QuotRemOp "quotRemWord32#" GenPrimOp Word32# -> Word32# -> (# Word3
     div_like = True
 
 primop Word32AndOp "andWord32#" GenPrimOp Word32# -> Word32# -> Word32#
-   {Relates to C @&@ in the interpreter.}
+   {Relates to C operator @&@ in the interpreter.}
    with commutable = True
 
 primop Word32OrOp "orWord32#" GenPrimOp Word32# -> Word32# -> Word32#
-   {Relates to C @|@ in the interpreter.}
+   {Relates to C operator @|@ in the interpreter.}
    with commutable = True
 
 primop Word32XorOp "xorWord32#" GenPrimOp Word32# -> Word32# -> Word32#
-   {Relates to C @^@ in the interpreter.}
+   {Relates to C operator @^@ in the interpreter.}
    with commutable = True
 
 primop Word32NotOp "notWord32#" GenPrimOp Word32# -> Word32#
-   {Relates to C @~@ in the interpreter.}
+   {Relates to C operator @~@ in the interpreter.}
 
 primop Word32SllOp "uncheckedShiftLWord32#"  GenPrimOp Word32# -> Int# -> Word32#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
    with
     shift_like = True
 
 primop Word32SrlOp "uncheckedShiftRLWord32#" GenPrimOp Word32# -> Int# -> Word32#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
    with
     shift_like = True
 
@@ -708,17 +708,17 @@ primop Word32ToInt32Op "word32ToInt32#" GenPrimOp Word32# -> Int32#
    with code_size = 0
 
 primop Word32EqOp "eqWord32#" Compare Word32# -> Word32# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Word32GeOp "geWord32#" Compare Word32# -> Word32# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Word32GtOp "gtWord32#" Compare Word32# -> Word32# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Word32LeOp "leWord32#" Compare Word32# -> Word32# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Word32LtOp "ltWord32#" Compare Word32# -> Word32# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Word32NeOp "neWord32#" Compare Word32# -> Word32# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Int64#"
@@ -731,18 +731,18 @@ primop Int64ToIntOp "int64ToInt#" GenPrimOp Int64# -> Int#
 primop IntToInt64Op "intToInt64#" GenPrimOp Int# -> Int64#
 
 primop Int64NegOp "negateInt64#" GenPrimOp Int64# -> Int64#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int64AddOp "plusInt64#" GenPrimOp Int64# -> Int64# -> Int64#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
    with
     commutable = True
 
 primop Int64SubOp "subInt64#" GenPrimOp Int64# -> Int64# -> Int64#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Int64MulOp "timesInt64#" GenPrimOp Int64# -> Int64# -> Int64#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
    with
     commutable = True
 
@@ -757,17 +757,17 @@ primop Int64RemOp "remInt64#" GenPrimOp Int64# -> Int64# -> Int64#
     div_like = True
 
 primop Int64SllOp "uncheckedIShiftL64#"  GenPrimOp Int64# -> Int# -> Int64#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
    with
     shift_like = True
 
 primop Int64SraOp "uncheckedIShiftRA64#" GenPrimOp Int64# -> Int# -> Int64#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
    with
     shift_like = True
 
 primop Int64SrlOp "uncheckedIShiftRL64#" GenPrimOp Int64# -> Int# -> Int64#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
    with
     shift_like = True
 
@@ -775,17 +775,17 @@ primop Int64ToWord64Op "int64ToWord64#" GenPrimOp Int64# -> Word64#
    with code_size = 0
 
 primop Int64EqOp "eqInt64#" Compare Int64# -> Int64# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Int64GeOp "geInt64#" Compare Int64# -> Int64# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Int64GtOp "gtInt64#" Compare Int64# -> Int64# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Int64LeOp "leInt64#" Compare Int64# -> Int64# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Int64LtOp "ltInt64#" Compare Int64# -> Int64# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Int64NeOp "neInt64#" Compare Int64# -> Int64# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Word64#"
@@ -798,15 +798,15 @@ primop Word64ToWordOp "word64ToWord#" GenPrimOp Word64# -> Word#
 primop WordToWord64Op "wordToWord64#" GenPrimOp Word# -> Word64#
 
 primop Word64AddOp "plusWord64#" GenPrimOp Word64# -> Word64# -> Word64#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
    with
     commutable = True
 
 primop Word64SubOp "subWord64#" GenPrimOp Word64# -> Word64# -> Word64#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop Word64MulOp "timesWord64#" GenPrimOp Word64# -> Word64# -> Word64#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
    with
     commutable = True
 
@@ -821,27 +821,27 @@ primop Word64RemOp "remWord64#" GenPrimOp Word64# -> Word64# -> Word64#
     div_like = True
 
 primop Word64AndOp "and64#" GenPrimOp Word64# -> Word64# -> Word64#
-   {Relates to C @&@ in the interpreter.}
+   {Relates to C operator @&@ in the interpreter.}
    with commutable = True
 
 primop Word64OrOp "or64#" GenPrimOp Word64# -> Word64# -> Word64#
-   {Relates to C @|@ in the interpreter.}
+   {Relates to C operator @|@ in the interpreter.}
    with commutable = True
 
 primop Word64XorOp "xor64#" GenPrimOp Word64# -> Word64# -> Word64#
-   {Relates to C @^@ in the interpreter.}
+   {Relates to C operator @^@ in the interpreter.}
    with commutable = True
 
 primop Word64NotOp "not64#" GenPrimOp Word64# -> Word64#
-   {Relates to C @~@ in the interpreter.}
+   {Relates to C operator @~@ in the interpreter.}
 
 primop Word64SllOp "uncheckedShiftL64#"  GenPrimOp Word64# -> Int# -> Word64#
-   {Relates to C @<<@ in the interpreter.}
+   {Relates to C operator @<<@ in the interpreter.}
    with
     shift_like = True
 
 primop Word64SrlOp "uncheckedShiftRL64#" GenPrimOp Word64# -> Int# -> Word64#
-   {Relates to C @>>@ in the interpreter.}
+   {Relates to C operator @>>@ in the interpreter.}
    with
     shift_like = True
 
@@ -849,17 +849,17 @@ primop Word64ToInt64Op "word64ToInt64#" GenPrimOp Word64# -> Int64#
    with code_size = 0
 
 primop Word64EqOp "eqWord64#" Compare Word64# -> Word64# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop Word64GeOp "geWord64#" Compare Word64# -> Word64# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop Word64GtOp "gtWord64#" Compare Word64# -> Word64# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop Word64LeOp "leWord64#" Compare Word64# -> Word64# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 primop Word64LtOp "ltWord64#" Compare Word64# -> Word64# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop Word64NeOp "neWord64#" Compare Word64# -> Word64# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 
 ------------------------------------------------------------------------
 section "Int#"
@@ -870,17 +870,17 @@ primtype Int#
 
 primop   IntAddOp    "+#"    GenPrimOp
    Int# -> Int# -> Int#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
    with commutable = True
         fixity = infixl 6
 
 primop   IntSubOp    "-#"    GenPrimOp   Int# -> Int# -> Int#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
    with fixity = infixl 6
 
 primop   IntMulOp    "*#"
    GenPrimOp   Int# -> Int# -> Int#
-   {Low word of signed integer multiply. Relates to C @*@ in the interpreter.}
+   {Low word of signed integer multiply. Relates to C operator @*@ in the interpreter.}
    with commutable = True
         fixity = infixl 7
 
@@ -938,22 +938,22 @@ primop   IntQuotRemOp "quotRemInt#"    GenPrimOp
         div_like = True
 
 primop   IntAndOp   "andI#"   GenPrimOp    Int# -> Int# -> Int#
-   {Bitwise "and". Relates to C @&@ in the interpreter.}
+   {Bitwise "and". Relates to C operator @&@ in the interpreter.}
    with commutable = True
 
 primop   IntOrOp   "orI#"     GenPrimOp    Int# -> Int# -> Int#
-   {Bitwise "or". Relates to C @|@ in the interpreter.}
+   {Bitwise "or". Relates to C operator @|@ in the interpreter.}
    with commutable = True
 
 primop   IntXorOp   "xorI#"   GenPrimOp    Int# -> Int# -> Int#
-   {Bitwise "xor". Relates to C @^@ in the interpreter.}
+   {Bitwise "xor". Relates to C operator @^@ in the interpreter.}
    with commutable = True
 
 primop   IntNotOp   "notI#"   GenPrimOp   Int# -> Int#
-   {Bitwise "not", also known as the binary complement. Relates to C @~@ in the interpreter.}
+   {Bitwise "not", also known as the binary complement. Relates to C operator @~@ in the interpreter.}
 
 primop   IntNegOp    "negateInt#"    GenPrimOp   Int# -> Int#
-   {Unary negation. Relates to C @-@ in the interpreter.
+   {Unary negation. Relates to C operator @-@ in the interpreter.
     Since the negative 'Int#' range extends one further than the
     positive range, 'negateInt#' of the most negative number is an
     identity operation. This way, 'negateInt#' is always its own inverse.}
@@ -976,31 +976,31 @@ primop   IntSubCOp   "subIntC#"    GenPrimOp   Int# -> Int# -> (# Int#, Int# #)
    with code_size = 2
 
 primop   IntGtOp  ">#"   Compare   Int# -> Int# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
    with fixity = infix 4
 
 primop   IntGeOp  ">=#"   Compare   Int# -> Int# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
    with fixity = infix 4
 
 primop   IntEqOp  "==#"   Compare
    Int# -> Int# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
    with commutable = True
         fixity = infix 4
 
 primop   IntNeOp  "/=#"   Compare
    Int# -> Int# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
    with commutable = True
         fixity = infix 4
 
 primop   IntLtOp  "<#"   Compare   Int# -> Int# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
    with fixity = infix 4
 
 primop   IntLeOp  "<=#"   Compare   Int# -> Int# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
    with fixity = infix 4
 
 primop   ChrOp   "chr#"   GenPrimOp   Int# -> Char#
@@ -1028,19 +1028,19 @@ primop   WordToDoubleOp   "word2Double#"          GenPrimOp  Word# -> Double#
     @'word2Double#' 1## == 1.0##@}
 
 primop   IntSllOp   "uncheckedIShiftL#" GenPrimOp  Int# -> Int# -> Int#
-         {Shift left. Relates to C @<<@ in the interpreter. Result undefined if shift amount is not
+         {Shift left. Relates to C operator @<<@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
 
 primop   IntSraOp   "uncheckedIShiftRA#" GenPrimOp Int# -> Int# -> Int#
-         {Shift right arithmetic. Relates to C @>>@ in the interpreter. Result undefined if shift amount is not
+         {Shift right arithmetic. Relates to C operator @>>@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
 
 primop   IntSrlOp   "uncheckedIShiftRL#" GenPrimOp Int# -> Int# -> Int#
-         {Shift right logical. Relates to C @>>@ in the interpreter. Result undefined if shift amount is not
+         {Shift right logical. Relates to C operator @>>@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
@@ -1053,7 +1053,7 @@ section "Word#"
 primtype Word#
 
 primop   WordAddOp   "plusWord#"   GenPrimOp   Word# -> Word# -> Word#
-   {Relates to C @+@ in the interpreter.}
+   {Relates to C operator @+@ in the interpreter.}
    with commutable = True
 
 primop   WordAddCOp   "addWordC#"   GenPrimOp   Word# -> Word# -> (# Word#, Int# #)
@@ -1077,10 +1077,10 @@ primop   WordAdd2Op   "plusWord2#"   GenPrimOp   Word# -> Word# -> (# Word#, Wor
         commutable = True
 
 primop   WordSubOp   "minusWord#"   GenPrimOp   Word# -> Word# -> Word#
-   {Relates to C @-@ in the interpreter.}
+   {Relates to C operator @-@ in the interpreter.}
 
 primop   WordMulOp   "timesWord#"   GenPrimOp   Word# -> Word# -> Word#
-   {Relates to C @*@ in the interpreter.}
+   {Relates to C operator @*@ in the interpreter.}
    with commutable = True
 
 -- Returns (# high, low #)
@@ -1109,28 +1109,28 @@ primop   WordQuotRem2Op "quotRemWord2#" GenPrimOp
         div_like = True
 
 primop   WordAndOp   "and#"   GenPrimOp   Word# -> Word# -> Word#
-   {Relates to C @&@ in the interpreter.}
+   {Relates to C operator @&@ in the interpreter.}
    with commutable = True
 
 primop   WordOrOp   "or#"   GenPrimOp   Word# -> Word# -> Word#
-   {Relates to C @|@ in the interpreter.}
+   {Relates to C operator @|@ in the interpreter.}
    with commutable = True
 
 primop   WordXorOp   "xor#"   GenPrimOp   Word# -> Word# -> Word#
-   {Relates to C @^@ in the interpreter.}
+   {Relates to C operator @^@ in the interpreter.}
    with commutable = True
 
 primop   WordNotOp   "not#"   GenPrimOp   Word# -> Word#
-   {Relates to C @~@ in the interpreter.}
+   {Relates to C operator @~@ in the interpreter.}
 
 primop   WordSllOp   "uncheckedShiftL#"   GenPrimOp   Word# -> Int# -> Word#
-         {Shift left logical. Relates to C @<<@ in the interpreter. Result undefined if shift amount is not
+         {Shift left logical. Relates to C operator @<<@ in the interpreter. Result undefined if shift amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
 
 primop   WordSrlOp   "uncheckedShiftRL#"   GenPrimOp   Word# -> Int# -> Word#
-         {Shift right logical. Relates to C @>>@ in the interpreter. Result undefined if shift  amount is not
+         {Shift right logical. Relates to C operator @>>@ in the interpreter. Result undefined if shift  amount is not
           in the range 0 to word size - 1 inclusive.}
   with
     shift_like = True
@@ -1139,17 +1139,17 @@ primop   WordToIntOp   "word2Int#"   GenPrimOp   Word# -> Int#
    with code_size = 0
 
 primop   WordGtOp   "gtWord#"   Compare   Word# -> Word# -> Int#
-   {Relates to C @>@ in the interpreter.}
+   {Relates to C operator @>@ in the interpreter.}
 primop   WordGeOp   "geWord#"   Compare   Word# -> Word# -> Int#
-   {Relates to C @>=@ in the interpreter.}
+   {Relates to C operator @>=@ in the interpreter.}
 primop   WordEqOp   "eqWord#"   Compare   Word# -> Word# -> Int#
-   {Relates to C @==@ in the interpreter.}
+   {Relates to C operator @==@ in the interpreter.}
 primop   WordNeOp   "neWord#"   Compare   Word# -> Word# -> Int#
-   {Relates to C @!=@ in the interpreter.}
+   {Relates to C operator @!=@ in the interpreter.}
 primop   WordLtOp   "ltWord#"   Compare   Word# -> Word# -> Int#
-   {Relates to C @<@ in the interpreter.}
+   {Relates to C operator @<@ in the interpreter.}
 primop   WordLeOp   "leWord#"   Compare   Word# -> Word# -> Int#
-   {Relates to C @<=@ in the interpreter.}
+   {Relates to C operator @<=@ in the interpreter.}
 
 primop   PopCnt8Op   "popCnt8#"   GenPrimOp   Word# -> Word#
     {Count the number of set bits in the lower 8 bits of a word.}
