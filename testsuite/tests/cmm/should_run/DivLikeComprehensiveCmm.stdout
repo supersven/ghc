@@ -1,0 +1,19 @@
+Testing comprehensive Cmm div_like operations
+
+=== Good Cases ===
+quotInt8# 42 6 = 7
+remInt8# 42 6 = 0
+quotWord8# 100 10 = 10
+remWord8# 100 10 = 0
+quotInt16# 1000 100 = 10
+remInt16# 1000 100 = 0
+quotInt32# 10000 1000 = 10
+remInt32# 10000 1000 = 0
+
+=== Bad Cases (should raise exceptions) ===
+✓ Int8 division by zero raised exception
+✓ Int8 overflow raised exception
+✓ Word8 division by zero raised exception
+✓ Int16 overflow raised exception
+✓ Int32 overflow raised exception
+All comprehensive Cmm tests completed!

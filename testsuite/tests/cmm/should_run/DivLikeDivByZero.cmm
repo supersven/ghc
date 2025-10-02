@@ -1,0 +1,9 @@
+#include "Cmm.h"
+
+// Test division by zero case
+testQuotInt8DivByZero() {
+    bits8 result;
+    // This should trigger RaiseDivZeroOp
+    result = %quot(42::bits8, 0::bits8);
+    return (%zx64(result));
+}

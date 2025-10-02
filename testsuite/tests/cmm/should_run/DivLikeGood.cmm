@@ -1,0 +1,88 @@
+#include "Cmm.h"
+
+// Test division operations in Cmm - good cases
+testQuotInt8Good() {
+    bits8 result;
+    // 42 / 6 = 7
+    result = %quot(42::bits8, 6::bits8);
+    return (%zx64(result));
+}
+
+testRemInt8Good() {
+    bits8 result;
+    // 42 % 6 = 0
+    result = %rem(42::bits8, 6::bits8);
+    return (%zx64(result));
+}
+
+testQuotWord8Good() {
+    bits8 result;
+    // 100 / 10 = 10
+    result = %quot(100::bits8, 10::bits8);
+    return (%zx64(result));
+}
+
+testRemWord8Good() {
+    bits8 result;
+    // 100 % 10 = 0
+    result = %rem(100::bits8, 10::bits8);
+    return (%zx64(result));
+}
+
+testQuotInt16Good() {
+    bits16 result;
+    // 1000 / 100 = 10
+    result = %quot(1000::bits16, 100::bits16);
+    return (%zx64(result));
+}
+
+testRemInt16Good() {
+    bits16 result;
+    // 1000 % 100 = 0
+    result = %rem(1000::bits16, 100::bits16);
+    return (%zx64(result));
+}
+
+// Test division by zero cases
+testQuotInt8DivByZero() {
+    bits8 result;
+    // This should trigger RaiseDivZeroOp
+    result = %quot(42::bits8, 0::bits8);
+    return (%zx64(result));
+}
+
+testRemInt8DivByZero() {
+    bits8 result;
+    // This should trigger RaiseDivZeroOp
+    result = %rem(42::bits8, 0::bits8);
+    return (%zx64(result));
+}
+
+testQuotWord8DivByZero() {
+    bits8 result;
+    // This should trigger RaiseDivZeroOp
+    result = %quot(100::bits8, 0::bits8);
+    return (%zx64(result));
+}
+
+// Test overflow cases (signed division)
+testQuotInt8Overflow() {
+    bits8 result;
+    // -128 / -1 should trigger overflow assertion
+    result = %quot((-128)::bits8, (-1)::bits8);
+    return (%zx64(result));
+}
+
+testRemInt8Overflow() {
+    bits8 result;
+    // -128 % -1 should trigger overflow assertion
+    result = %rem((-128)::bits8, (-1)::bits8);
+    return (%zx64(result));
+}
+
+testQuotInt16Overflow() {
+    bits16 result;
+    // -32768 / -1 should trigger overflow assertion
+    result = %quot((-32768)::bits16, (-1)::bits16);
+    return (%zx64(result));
+}

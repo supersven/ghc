@@ -52,3 +52,24 @@ test('T25601',
      [req_cmm],
      multi_compile_and_run,
      ['T25601', [('T25601a.cmm', '')], ''])
+
+# Div_like primop Cmm boundary tests
+test('DivLikeGood',
+     [req_cmm],
+     multi_compile_and_run,
+     ['DivLikeGood', [('DivLikeGood.cmm', '')], ''])
+
+test('DivLikeDivByZero',
+     [req_cmm, exit_code(1)],
+     multi_compile_and_run,
+     ['DivLikeDivByZero', [('DivLikeDivByZero.cmm', '')], ''])
+
+test('DivLikeOverflow',
+     [req_cmm, exit_code(1)],
+     multi_compile_and_run,
+     ['DivLikeOverflow', [('DivLikeOverflow.cmm', '')], ''])
+
+test('DivLikeComprehensiveCmm',
+     [req_cmm],
+     multi_compile_and_run,
+     ['DivLikeComprehensiveCmm', [('DivLikeComprehensiveCmm.cmm', '')], ''])

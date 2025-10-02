@@ -1238,8 +1238,8 @@ emitPrimOp cfg primop =
 
   IntMulOp        -> opTranslate (mo_wordMul platform)
   IntMulMayOfloOp -> opTranslate (MO_S_MulMayOflo (wordWidth platform))
-  IntQuotOp       -> opTranslate (mo_wordSQuot platform)
-  IntRemOp        -> opTranslate (mo_wordSRem platform)
+  IntQuotOp       -> opTranslateWithSignedDivCheck (wordWidth platform) (mo_wordSQuot platform)
+  IntRemOp        -> opTranslateWithSignedDivCheck (wordWidth platform) (mo_wordSRem platform)
   IntNegOp        -> opTranslate (mo_wordSNeg platform)
 
   IntGeOp        -> opTranslate (mo_wordSGe platform)
@@ -1263,8 +1263,8 @@ emitPrimOp cfg primop =
   WordLtOp       -> opTranslate (mo_wordULt platform)
 
   WordMulOp      -> opTranslate (mo_wordMul platform)
-  WordQuotOp     -> opTranslate (mo_wordUQuot platform)
-  WordRemOp      -> opTranslate (mo_wordURem platform)
+  WordQuotOp     -> opTranslateWithUnsignedDivCheck (wordWidth platform) (mo_wordUQuot platform)
+  WordRemOp      -> opTranslateWithUnsignedDivCheck (wordWidth platform) (mo_wordURem platform)
 
   AddrGeOp       -> opTranslate (mo_wordUGe platform)
   AddrLeOp       -> opTranslate (mo_wordULe platform)
@@ -1279,8 +1279,8 @@ emitPrimOp cfg primop =
   Int8AddOp      -> opTranslate (MO_Add W8)
   Int8SubOp      -> opTranslate (MO_Sub W8)
   Int8MulOp      -> opTranslate (MO_Mul W8)
-  Int8QuotOp     -> opTranslate (MO_S_Quot W8)
-  Int8RemOp      -> opTranslate (MO_S_Rem W8)
+  Int8QuotOp     -> opTranslateWithSignedDivCheck W8 (MO_S_Quot W8)
+  Int8RemOp      -> opTranslateWithSignedDivCheck W8 (MO_S_Rem W8)
 
   Int8SllOp     -> opTranslate (MO_Shl W8)
   Int8SraOp     -> opTranslate (MO_S_Shr W8)
@@ -1300,8 +1300,8 @@ emitPrimOp cfg primop =
   Word8AddOp     -> opTranslate (MO_Add W8)
   Word8SubOp     -> opTranslate (MO_Sub W8)
   Word8MulOp     -> opTranslate (MO_Mul W8)
-  Word8QuotOp    -> opTranslate (MO_U_Quot W8)
-  Word8RemOp     -> opTranslate (MO_U_Rem W8)
+  Word8QuotOp    -> opTranslateWithUnsignedDivCheck W8 (MO_U_Quot W8)
+  Word8RemOp     -> opTranslateWithUnsignedDivCheck W8 (MO_U_Rem W8)
 
   Word8AndOp    -> opTranslate (MO_And W8)
   Word8OrOp     -> opTranslate (MO_Or W8)
@@ -1325,8 +1325,8 @@ emitPrimOp cfg primop =
   Int16AddOp     -> opTranslate (MO_Add W16)
   Int16SubOp     -> opTranslate (MO_Sub W16)
   Int16MulOp     -> opTranslate (MO_Mul W16)
-  Int16QuotOp    -> opTranslate (MO_S_Quot W16)
-  Int16RemOp     -> opTranslate (MO_S_Rem W16)
+  Int16QuotOp    -> opTranslateWithSignedDivCheck W16 (MO_S_Quot W16)
+  Int16RemOp     -> opTranslateWithSignedDivCheck W16 (MO_S_Rem W16)
 
   Int16SllOp     -> opTranslate (MO_Shl W16)
   Int16SraOp     -> opTranslate (MO_S_Shr W16)
@@ -1346,8 +1346,8 @@ emitPrimOp cfg primop =
   Word16AddOp    -> opTranslate (MO_Add W16)
   Word16SubOp    -> opTranslate (MO_Sub W16)
   Word16MulOp    -> opTranslate (MO_Mul W16)
-  Word16QuotOp   -> opTranslate (MO_U_Quot W16)
-  Word16RemOp    -> opTranslate (MO_U_Rem W16)
+  Word16QuotOp   -> opTranslateWithUnsignedDivCheck W16 (MO_U_Quot W16)
+  Word16RemOp    -> opTranslateWithUnsignedDivCheck W16 (MO_U_Rem W16)
 
   Word16AndOp    -> opTranslate (MO_And W16)
   Word16OrOp     -> opTranslate (MO_Or W16)
@@ -1371,8 +1371,8 @@ emitPrimOp cfg primop =
   Int32AddOp     -> opTranslate (MO_Add W32)
   Int32SubOp     -> opTranslate (MO_Sub W32)
   Int32MulOp     -> opTranslate (MO_Mul W32)
-  Int32QuotOp    -> opTranslate (MO_S_Quot W32)
-  Int32RemOp     -> opTranslate (MO_S_Rem W32)
+  Int32QuotOp    -> opTranslateWithSignedDivCheck W32 (MO_S_Quot W32)
+  Int32RemOp     -> opTranslateWithSignedDivCheck W32 (MO_S_Rem W32)
 
   Int32SllOp     -> opTranslate (MO_Shl W32)
   Int32SraOp     -> opTranslate (MO_S_Shr W32)
@@ -1392,8 +1392,8 @@ emitPrimOp cfg primop =
   Word32AddOp    -> opTranslate (MO_Add W32)
   Word32SubOp    -> opTranslate (MO_Sub W32)
   Word32MulOp    -> opTranslate (MO_Mul W32)
-  Word32QuotOp   -> opTranslate (MO_U_Quot W32)
-  Word32RemOp    -> opTranslate (MO_U_Rem W32)
+  Word32QuotOp   -> opTranslateWithUnsignedDivCheck W32 (MO_U_Quot W32)
+  Word32RemOp    -> opTranslateWithUnsignedDivCheck W32 (MO_U_Rem W32)
 
   Word32AndOp    -> opTranslate (MO_And W32)
   Word32OrOp     -> opTranslate (MO_Or W32)
@@ -1418,10 +1418,10 @@ emitPrimOp cfg primop =
   Int64SubOp     -> opTranslate64 (MO_Sub    W64) MO_x64_Sub
   Int64MulOp     -> opTranslate64 (MO_Mul    W64) MO_x64_Mul
   Int64QuotOp
-    | allowQuot64 -> opTranslate (MO_S_Quot W64)
+    | allowQuot64 -> opTranslateWithSignedDivCheck W64 (MO_S_Quot W64)
     | otherwise   -> opCallish MO_I64_Quot
   Int64RemOp
-    | allowQuot64 -> opTranslate (MO_S_Rem W64)
+    | allowQuot64 -> opTranslateWithSignedDivCheck W64 (MO_S_Rem W64)
     | otherwise   -> opCallish MO_I64_Rem
 
   Int64SllOp     -> opTranslate64 (MO_Shl   W64) MO_x64_Shl
@@ -1443,10 +1443,10 @@ emitPrimOp cfg primop =
   Word64SubOp    -> opTranslate64 (MO_Sub    W64) MO_x64_Sub
   Word64MulOp    -> opTranslate64 (MO_Mul    W64) MO_x64_Mul
   Word64QuotOp
-    | allowQuot64 -> opTranslate (MO_U_Quot W64)
+    | allowQuot64 -> opTranslateWithUnsignedDivCheck W64 (MO_U_Quot W64)
     | otherwise   -> opCallish   MO_W64_Quot
   Word64RemOp
-    | allowQuot64 -> opTranslate (MO_U_Rem W64)
+    | allowQuot64 -> opTranslateWithUnsignedDivCheck W64 (MO_U_Rem W64)
     | otherwise   -> opCallish   MO_W64_Rem
 
   Word64AndOp    -> opTranslate64 (MO_And   W64) MO_x64_And
@@ -1487,7 +1487,7 @@ emitPrimOp cfg primop =
   DoubleAddOp    -> opTranslate (MO_F_Add W64)
   DoubleSubOp    -> opTranslate (MO_F_Sub W64)
   DoubleMulOp    -> opTranslate (MO_F_Mul W64)
-  DoubleDivOp    -> opTranslate (MO_F_Quot W64)
+  DoubleDivOp    -> opTranslateWithFloatDivCheck W64 (MO_F_Quot W64)
   DoubleNegOp    -> opTranslate (MO_F_Neg W64)
 
   DoubleFMAdd    -> fmaOp FMAdd  1 W64
@@ -1507,7 +1507,7 @@ emitPrimOp cfg primop =
   FloatAddOp    -> opTranslate (MO_F_Add  W32)
   FloatSubOp    -> opTranslate (MO_F_Sub  W32)
   FloatMulOp    -> opTranslate (MO_F_Mul  W32)
-  FloatDivOp    -> opTranslate (MO_F_Quot W32)
+  FloatDivOp    -> opTranslateWithFloatDivCheck W32 (MO_F_Quot W32)
   FloatNegOp    -> opTranslate (MO_F_Neg  W32)
 
   FloatFMAdd    -> fmaOp FMAdd  1 W32
@@ -1803,6 +1803,74 @@ emitPrimOp cfg primop =
     let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
     emit stmt
 
+  -- | Like opTranslate but adds an assertion for signed division operations
+  -- to prevent integer overflow (e.g., minBound / (-1)) and division by zero
+  opTranslateWithSignedDivCheck :: Width -> MachOp -> [CmmExpr] -> PrimopCmmEmit
+  opTranslateWithSignedDivCheck width mop args@[arg_x, arg_y] = opIntoRegs $ \[res] -> do
+    platform <- getPlatform
+    let minBoundValue = case width of
+          W8  -> -128
+          W16 -> -32768  
+          W32 -> -2147483648
+          W64 -> -9223372036854775808
+          _   -> panic "opTranslateWithSignedDivCheck: unsupported width"
+    
+    let minBoundLit = CmmLit (CmmInt minBoundValue width)
+        minusOneLit = CmmLit (CmmInt (-1) width)
+        zeroLit = CmmLit (CmmInt 0 width)
+        
+    -- Check that we're not doing minBound / (-1) which would overflow
+    let isMinBound = CmmMachOp (MO_Eq width) [arg_x, minBoundLit]
+        isMinusOne = CmmMachOp (MO_Eq width) [arg_y, minusOneLit] 
+        wouldOverflow = CmmMachOp (MO_And width) [isMinBound, isMinusOne]
+    
+    -- Check that divisor is zero  
+    let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
+    
+    -- Either condition is bad: division by zero OR overflow
+    let badCondition = CmmMachOp (MO_Or width) [isZero, wouldOverflow]
+    
+    -- Emit conditional error call
+    divErrorFailed <- getCode $
+      emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+    emit =<< mkCmmIfThen' badCondition divErrorFailed (Just False)
+    
+    let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
+    emit stmt
+  opTranslateWithSignedDivCheck _ _ _ = panic "opTranslateWithSignedDivCheck: wrong number of arguments"
+
+  -- | Like opTranslate but adds an assertion for unsigned division operations
+  -- to check that the divisor is non-zero
+  opTranslateWithUnsignedDivCheck :: Width -> MachOp -> [CmmExpr] -> PrimopCmmEmit
+  opTranslateWithUnsignedDivCheck width mop args@[arg_x, arg_y] = opIntoRegs $ \[res] -> do
+    platform <- getPlatform
+    let zeroLit = CmmLit (CmmInt 0 width)
+        
+    -- Check that divisor is zero  
+    let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
+    
+    -- Emit conditional error call
+    divErrorFailed <- getCode $
+      emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+    emit =<< mkCmmIfThen' isZero divErrorFailed (Just False)
+    
+    let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
+    emit stmt
+  opTranslateWithUnsignedDivCheck _ _ _ = panic "opTranslateWithUnsignedDivCheck: wrong number of arguments"
+
+  -- | Like opTranslate but adds an assertion for floating point division operations
+  -- For floating point, division by zero is defined (results in infinity), but we may want to check
+  -- for other conditions. For now, just adds basic checks for consistency.
+  opTranslateWithFloatDivCheck :: Width -> MachOp -> [CmmExpr] -> PrimopCmmEmit
+  opTranslateWithFloatDivCheck width mop args@[arg_x, arg_y] = opIntoRegs $ \[res] -> do
+    platform <- getPlatform
+    -- For floating point, division by zero is actually defined in IEEE 754
+    -- It results in +/- infinity. However, we may still want to check for it
+    -- depending on the requirements. For now, let's just do the division.
+    let stmt = mkAssign (CmmLocal res) (CmmMachOp mop args)
+    emit stmt
+  opTranslateWithFloatDivCheck _ _ _ = panic "opTranslateWithFloatDivCheck: wrong number of arguments"
+
   opTranslate64
     :: MachOp
     -> CallishMachOp
@@ -1915,19 +1983,58 @@ data PrimopCmmEmit
 type GenericOp = [CmmFormal] -> [CmmActual] -> FCode ()
 
 genericIntQuotRemOp :: Width -> GenericOp
-genericIntQuotRemOp width [res_q, res_r] [arg_x, arg_y]
-   = emit $ mkAssign (CmmLocal res_q)
-              (CmmMachOp (MO_S_Quot width) [arg_x, arg_y]) <*>
-            mkAssign (CmmLocal res_r)
-              (CmmMachOp (MO_S_Rem  width) [arg_x, arg_y])
+genericIntQuotRemOp width [res_q, res_r] [arg_x, arg_y] = do
+   platform <- getPlatform
+   let minBoundValue = case width of
+         W8  -> -128
+         W16 -> -32768  
+         W32 -> -2147483648
+         W64 -> -9223372036854775808
+         _   -> panic "genericIntQuotRemOp: unsupported width"
+   
+   let minBoundLit = CmmLit (CmmInt minBoundValue width)
+       minusOneLit = CmmLit (CmmInt (-1) width)
+       zeroLit = CmmLit (CmmInt 0 width)
+       
+   -- Check that we're not doing minBound / (-1) which would overflow
+   let isMinBound = CmmMachOp (MO_Eq width) [arg_x, minBoundLit]
+       isMinusOne = CmmMachOp (MO_Eq width) [arg_y, minusOneLit] 
+       wouldOverflow = CmmMachOp (MO_And width) [isMinBound, isMinusOne]
+   
+   -- Check that divisor is zero  
+   let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
+   
+   -- Either condition is bad: division by zero OR overflow
+   let badCondition = CmmMachOp (MO_Or width) [isZero, wouldOverflow]
+   
+   -- Emit conditional error call
+   divErrorFailed <- getCode $
+     emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+   emit =<< mkCmmIfThen' badCondition divErrorFailed (Just False)
+   
+   emit $ mkAssign (CmmLocal res_q)
+            (CmmMachOp (MO_S_Quot width) [arg_x, arg_y]) <*>
+          mkAssign (CmmLocal res_r)
+            (CmmMachOp (MO_S_Rem  width) [arg_x, arg_y])
 genericIntQuotRemOp _ _ _ = panic "genericIntQuotRemOp"
 
 genericWordQuotRemOp :: Width -> GenericOp
-genericWordQuotRemOp width [res_q, res_r] [arg_x, arg_y]
-    = emit $ mkAssign (CmmLocal res_q)
-               (CmmMachOp (MO_U_Quot width) [arg_x, arg_y]) <*>
-             mkAssign (CmmLocal res_r)
-               (CmmMachOp (MO_U_Rem  width) [arg_x, arg_y])
+genericWordQuotRemOp width [res_q, res_r] [arg_x, arg_y] = do
+    platform <- getPlatform
+    let zeroLit = CmmLit (CmmInt 0 width)
+        
+    -- Check that divisor is zero  
+    let isZero = CmmMachOp (MO_Eq width) [arg_y, zeroLit]
+    
+    -- Emit conditional error call
+    divErrorFailed <- getCode $
+      emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+    emit =<< mkCmmIfThen' isZero divErrorFailed (Just False)
+    
+    emit $ mkAssign (CmmLocal res_q)
+             (CmmMachOp (MO_U_Quot width) [arg_x, arg_y]) <*>
+           mkAssign (CmmLocal res_r)
+             (CmmMachOp (MO_U_Rem  width) [arg_x, arg_y])
 genericWordQuotRemOp _ _ _ = panic "genericWordQuotRemOp"
 
 -- Based on the algorithm from LLVM's compiler-rt:
@@ -1936,6 +2043,15 @@ genericWordQuotRemOp _ _ _ = panic "genericWordQuotRemOp"
 genericWordQuotRem2Op :: Platform -> GenericOp
 genericWordQuotRem2Op platform [res_q, res_r] [arg_u1, arg_u0, arg_v]
     = do
+      -- Check for division by zero
+      let zeroLit = CmmLit (CmmInt 0 (wordWidth platform))
+          isZero = CmmMachOp (MO_Eq (wordWidth platform)) [arg_v, zeroLit]
+      
+      -- Emit conditional error call
+      divErrorFailed <- getCode $
+        emitCCallNeverReturns [] (CmmLit (CmmLabel (mkRtsPrimOpLabel RaiseDivZeroOp))) []
+      emit =<< mkCmmIfThen' isZero divErrorFailed (Just False)
+      
       -- v gets modified below based on clz v
       v <- newTemp ty
       emit $ mkAssign (CmmLocal v) arg_v

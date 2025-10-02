@@ -1,0 +1,8 @@
+Testing Cmm div_like operations - good cases
+quotInt8# 42 6 = 7
+remInt8# 42 6 = 0
+quotWord8# 100 10 = 10
+remWord8# 100 10 = 0
+quotInt16# 1000 100 = 10
+remInt16# 1000 100 = 0
+All good cases completed successfully!

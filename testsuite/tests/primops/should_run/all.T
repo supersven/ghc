@@ -91,3 +91,10 @@ test('T24496'
       ]
     , compile_and_run, ['-O'])
 test('T6026', normal, compile_and_run, [''])
+
+# Div_like primop boundary tests
+test('DivLikeBoundary', normal, compile_and_run, [''])
+test('DivLikeBoundaryFail1', exit_code(1), compile_and_run, [''])
+test('DivLikeBoundaryFail2', exit_code(1), compile_and_run, [''])
+test('DivLikeBoundaryExceptions', normal, compile_and_run, [''])
+test('DivLikeBoundaryComprehensive', normal, compile_and_run, [''])
