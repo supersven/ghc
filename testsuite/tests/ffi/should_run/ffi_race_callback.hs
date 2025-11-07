@@ -14,8 +14,7 @@
 module Main where
 
 import Foreign.Ptr
-import Foreign.C.Types
-import Control.Monad (forever, replicateM_)
+import Control.Monad (forever)
 import System.IO
 import Control.Concurrent (threadDelay)
 

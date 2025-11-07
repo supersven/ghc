@@ -265,7 +265,7 @@ test('T24818', [req_cmm, req_c], compile_and_run, ['-XUnliftedFFITypes T24818_cm
 # Test to reproduce race condition between FFI return and callback invocation
 # This test is designed to run forever until it hits the race condition
 # which will cause an assertion failure in the debug RTS (rts/Schedule.c:2444)
-# Uses debug RTS (sanity way) without threading to maximize chance of race
+# Uses debug RTS (sanity way) without threading as specified in requirements
 test('ffi_race_callback',
      [only_ways(['sanity']),
       when(opsys('mingw32'), skip),  # uses pthreads
