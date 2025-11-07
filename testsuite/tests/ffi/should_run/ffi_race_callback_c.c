@@ -61,12 +61,20 @@ void test_race(void (*callback)(void)) {
     
     // Allocate data for the callback thread
     data = (callback_data_t*)malloc(sizeof(callback_data_t));
+    if (data == NULL) {
+        // If malloc fails, skip this iteration
+        return;
+    }
     data->callback = callback;
     data->delay_ns = callback_delay_ns;
     
     // Start a thread to invoke the callback after a delay
     // Using detached thread to avoid need to join
-    pthread_create(&thread, NULL, callback_thread, data);
+    if (pthread_create(&thread, NULL, callback_thread, data) != 0) {
+        // If thread creation fails, free the allocated memory
+        free(data);
+        return;
+    }
     pthread_detach(thread);
     
     // Wait before returning from this function
