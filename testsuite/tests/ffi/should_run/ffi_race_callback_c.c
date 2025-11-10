@@ -15,7 +15,7 @@ typedef struct {
 // This creates the "C -> Haskell" callback part of the race
 static void* callback_thread(void* arg) {
     callback_data_t* data = (callback_data_t*)arg;
-    
+ 
     // Small random delay (0-100 microseconds)
     // This timing is critical - we want it very close to the return time
     if (data->delay_ns > 0) {
@@ -24,11 +24,11 @@ static void* callback_thread(void* arg) {
         ts.tv_nsec = data->delay_ns;
         nanosleep(&ts, NULL);
     }
-    
+ 
     // Invoke the callback - this calls back into Haskell
     // and may need to create/use a task
     data->callback();
-    
+ 
     free(data);
     return NULL;
 }
@@ -41,13 +41,13 @@ void test_race(void (*callback)(void)) {
     callback_data_t* data;
     int callback_delay_ns;
     int return_delay_ns;
-    
+
     // Initialize random seed once
     if (!initialized) {
         srand(time(NULL) ^ getpid());
         initialized = 1;
     }
-    
+ 
     // Generate random delays between 0-100 microseconds (0-100000 nanoseconds)
     // This creates scenarios where:
     // - callback happens before return (callback_delay < return_delay)
@@ -68,7 +68,7 @@ void test_race(void (*callback)(void)) {
     }
     data->callback = callback;
     data->delay_ns = callback_delay_ns;
-    
+ 
     // Start a thread to invoke the callback after a delay
     // Using detached thread to avoid need to join
     if (pthread_create(&thread, NULL, callback_thread, data) != 0) {
@@ -78,7 +78,7 @@ void test_race(void (*callback)(void)) {
         return;
     }
     pthread_detach(thread);
-    
+ 
     // Wait before returning from this function
     // When we return, the Haskell RTS will call recoverSuspendedTask
     if (return_delay_ns > 0) {
@@ -87,7 +87,7 @@ void test_race(void (*callback)(void)) {
         ts.tv_nsec = return_delay_ns;
         nanosleep(&ts, NULL);
     }
-    
+
     // Return to Haskell - this triggers recoverSuspendedTask
     // The race condition can occur if the callback thread calls back into
     // Haskell (which may call suspendTask) at nearly the same time as we return
