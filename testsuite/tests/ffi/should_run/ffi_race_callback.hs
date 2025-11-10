@@ -3,7 +3,7 @@
 -- Test to reproduce a race condition between returning from an FFI call
 -- and invoking an FFI callback. This happens when both occur at nearly
 -- the same time, potentially triggering the assertion at
--- rts/Schedule.c:2444: ASSERT(incall->next == NULL && incall->prev == NULL)
+-- rts/Schedule.c:2463: ASSERT(cap->suspended_ccalls == incall);
 --
 -- The scenario:
 -- 1. Haskell makes a safe FFI call to C (task gets suspended)
@@ -41,7 +41,7 @@ main = do
   hSetBuffering stderr NoBuffering
   putStrLn "Starting FFI race condition reproducer..."
   putStrLn "This test runs forever. If it hits the race condition, it will abort with an assertion failure."
-  putStrLn "Expected assertion: rts/Schedule.c:2444: ASSERT(incall->next == NULL && incall->prev == NULL)"
+  putStrLn "Expected assertion: rts/Schedule.c:2463: ASSERT(cap->suspended_ccalls == incall);"
   
   -- Create function pointer for the callback
   callbackPtr <- mkCallback callback

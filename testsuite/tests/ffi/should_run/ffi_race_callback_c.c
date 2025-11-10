@@ -91,5 +91,5 @@ void test_race(void (*callback)(void)) {
     // Return to Haskell - this triggers recoverSuspendedTask
     // The race condition can occur if the callback thread calls back into
     // Haskell (which may call suspendTask) at nearly the same time as we return
-    // This can violate the assertion: ASSERT(incall->next == NULL && incall->prev == NULL)
+    // This can violate the assertion: ASSERT(cap->suspended_ccalls == incall);
 }
