@@ -58,7 +58,8 @@ void test_race(void (*callback)(void)) {
     //   -> RACE CONDITION: both trying to manipulate task state simultaneously
     callback_delay_ns = rand() % 100000;
     return_delay_ns = rand() % 100000;
-    
+    fprintf(stderr, "Delays: callback_delay_ns %d, return_delay_ns: %d\n", callback_delay_ns, return_delay_ns);
+
     // Allocate data for the callback thread
     data = (callback_data_t*)malloc(sizeof(callback_data_t));
     if (data == NULL) {
