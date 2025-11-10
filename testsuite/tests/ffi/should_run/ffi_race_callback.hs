@@ -19,7 +19,7 @@ import System.IO
 import Control.Concurrent (threadDelay)
 
 -- Haskell callback that will be invoked from C
--- This callback does minimal work to maximize the chance of the race
+-- The work done in the callback doesn't matter. So, it's just a minimal stub.
 callback :: IO ()
 callback = return ()
 
