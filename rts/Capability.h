@@ -377,6 +377,11 @@ INLINE_HEADER void    discardSparksCap  (Capability *cap);
 //
 extern void grabCapability (Capability **pCap);
 
+// Mutex to synchronize FFI boundaries (callback entry and function return)
+// in the non-threaded RTS. This prevents race conditions when callbacks
+// and FFI returns happen simultaneously.
+extern Mutex ffi_boundary_lock;
+
 #endif /* !THREADED_RTS */
 
 // Shut down all capabilities.

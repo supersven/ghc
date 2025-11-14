@@ -2568,6 +2568,12 @@ resumeThread (void *task_)
     cap = incall->suspended_cap;
     task->cap = cap;
 
+#if !defined(THREADED_RTS)
+    // In non-threaded RTS, protect the FFI boundary to prevent race conditions
+    // between resuming from FFI calls and FFI callbacks entering Haskell.
+    ACQUIRE_LOCK(&ffi_boundary_lock);
+#endif
+
     // Wait for permission to re-enter the RTS with the result.
     waitForCapability(&cap,task);
     // we might be on a different capability now... but if so, our
@@ -2576,6 +2582,11 @@ resumeThread (void *task_)
 
     // Remove the thread from the suspended list
     recoverSuspendedTask(cap,task);
+
+#if !defined(THREADED_RTS)
+    // Release the FFI boundary lock after we've safely recovered the task
+    RELEASE_LOCK(&ffi_boundary_lock);
+#endif
 
     tso = incall->suspended_tso;
     incall->suspended_tso = NULL;

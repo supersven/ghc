@@ -654,8 +654,19 @@ rts_lock (void)
     }
 #endif
 
+#if !defined(THREADED_RTS)
+    // In non-threaded RTS, protect the FFI boundary to prevent race conditions
+    // between FFI callbacks entering Haskell and FFI calls returning to Haskell.
+    ACQUIRE_LOCK(&ffi_boundary_lock);
+#endif
+
     cap = NULL;
     waitForCapability(&cap, task);
+
+#if !defined(THREADED_RTS)
+    // Release the FFI boundary lock after we've successfully acquired the capability
+    RELEASE_LOCK(&ffi_boundary_lock);
+#endif
 
     if (task->incall->prev_stack == NULL) {
       // This is a new outermost call from C into Haskell land.
