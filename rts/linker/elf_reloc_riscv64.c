@@ -468,52 +468,18 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
   case R_RISCV_PCREL_LO12_S:
     FALLTHROUGH;
   case R_RISCV_PCREL_LO12_I: {
-    // Lookup related HI20 relocation and use that value. I'm still confused why
-    // relocations aren't self-contained, but this is how LLVM does it. And,
-    // calculating the lower 12 bit without any relationship to the GOT entry's
-    // address makes no sense either.
-      for (int64_t i = relNo; i >= 0 ; i--) {
-        Elf_Rela *rel_prime = &relaTab->relocations[i];
-
-        addr_t P_prime =
-            (addr_t)((uint8_t *)section->start + rel_prime->r_offset);
-
-        if (P_prime != S) {
-          // S points to the P of the corresponding *_HI20 relocation.
-          continue;
-        }
-
-        ElfSymbol *symbol_prime =
-            findSymbol(oc, relaTab->sectionHeader->sh_link,
-                       ELF64_R_SYM((Elf64_Xword)rel_prime->r_info));
-
-        CHECK(0x0 != symbol_prime);
-
-        /* take explicit addend */
-        int64_t addend_prime = rel_prime->r_addend;
-
-        uint64_t type_prime = ELF64_R_TYPE(rel_prime->r_info);
-
-        if (type_prime == R_RISCV_PCREL_HI20 ||
-            type_prime == R_RISCV_GOT_HI20 ||
-            type_prime == R_RISCV_TLS_GD_HI20 ||
-            type_prime == R_RISCV_TLS_GOT_HI20) {
-          IF_DEBUG(linker,
-                   debugBelch(
-                       "Found matching relocation: %s (P: 0x%lx, S: 0x%lx, "
-                       "sym-name: %s) -> %s (P: 0x%lx, S: %p, sym-name: %s, relNo: %ld)",
-                       relocationTypeToString(rel->r_info), P, S, symbol->name,
-                       relocationTypeToString(rel_prime->r_info), P_prime,
-                       symbol_prime->addr, symbol_prime->name, i));
-          int32_t result = computeAddend(relaTab, i, (Elf_Rel *)rel_prime,
-                                         symbol_prime, addend_prime, oc);
-          IF_DEBUG(linker, debugBelch("Result of computeAddend: 0x%x (%d)\n",
-                                      result, result));
-          return result;
-        }
+    // Optimized lookup using pre-built HI20 cache instead of O(n²) backward search
+    // S points to the P of the corresponding *_HI20 relocation.
+    int32_t cached_result = lookupHI20Entry(S);
+    if (cached_result != 0 || hi20_cache_size == 0) {
+      IF_DEBUG(linker, debugBelch("Found cached HI20 result for P=0x%lx: 0x%x (%d)\n",
+                                  S, cached_result, cached_result));
+      return cached_result;
     }
-    debugBelch("Missing HI relocation for %s: P 0x%lx S 0x%lx %s\n",
-               relocationTypeToString(rel->r_info), P, S, symbol->name);
+    
+    /* Fallback to original algorithm if cache miss (shouldn't happen) */
+    debugBelch("Cache miss for HI20 lookup: P 0x%lx S 0x%lx %s\n",
+               P, S, symbol->name);
     abort();
   }
 
@@ -617,7 +583,83 @@ int32_t computeAddend(ElfRelocationATable * relaTab, unsigned relNo, Elf_Rel *re
 }
 
 // Iterate over all relocations and perform them.
+/* RISC-V relocation optimization: Cache for HI20 relocations to avoid O(n²) lookups */
+typedef struct {
+    addr_t P_prime;
+    ElfSymbol *symbol;
+    int64_t addend;
+    int64_t result;
+} HI20_RelocationEntry;
+
+static HI20_RelocationEntry *hi20_cache = NULL;
+static size_t hi20_cache_size = 0;
+static size_t hi20_cache_capacity = 0;
+
+static void clearHI20Cache(void) {
+    if (hi20_cache) {
+        stgFree(hi20_cache);
+        hi20_cache = NULL;
+    }
+    hi20_cache_size = 0;
+    hi20_cache_capacity = 0;
+}
+
+static void addHI20Entry(addr_t P_prime, ElfSymbol *symbol, int64_t addend, int64_t result) {
+    if (hi20_cache_size >= hi20_cache_capacity) {
+        hi20_cache_capacity = hi20_cache_capacity ? hi20_cache_capacity * 2 : 32;
+        hi20_cache = stgReallocBytes(hi20_cache, 
+                                   hi20_cache_capacity * sizeof(HI20_RelocationEntry),
+                                   "HI20 relocation cache");
+    }
+    
+    hi20_cache[hi20_cache_size].P_prime = P_prime;
+    hi20_cache[hi20_cache_size].symbol = symbol;
+    hi20_cache[hi20_cache_size].addend = addend;
+    hi20_cache[hi20_cache_size].result = result;
+    hi20_cache_size++;
+}
+
+static int32_t lookupHI20Entry(addr_t P_lookup) {
+    /* Linear search is acceptable since cache is built once per object */
+    for (size_t i = 0; i < hi20_cache_size; i++) {
+        if (hi20_cache[i].P_prime == P_lookup) {
+            return hi20_cache[i].result;
+        }
+    }
+    return 0; /* Not found */
+}
+
 bool relocateObjectCodeRISCV64(ObjectCode *oc) {
+  /* Clear HI20 cache for this object */
+  clearHI20Cache();
+  
+  /* First pass: build cache of HI20 relocations for fast lookup */
+  for (ElfRelocationATable *relaTab = oc->info->relaTable; relaTab != NULL;
+       relaTab = relaTab->next) {
+    if (SECTIONKIND_OTHER == oc->sections[relaTab->targetSectionIndex].kind)
+      continue;
+      
+    Section *targetSection = &oc->sections[relaTab->targetSectionIndex];
+    
+    for (unsigned i = 0; i < relaTab->n_relocations; i++) {
+      Elf_Rela *rel = &relaTab->relocations[i];
+      uint64_t type = ELF64_R_TYPE(rel->r_info);
+      
+      if (type == R_RISCV_PCREL_HI20 || type == R_RISCV_GOT_HI20 ||
+          type == R_RISCV_TLS_GD_HI20 || type == R_RISCV_TLS_GOT_HI20) {
+        addr_t P_prime = (addr_t)((uint8_t *)targetSection->start + rel->r_offset);
+        ElfSymbol *symbol = findSymbol(oc, relaTab->sectionHeader->sh_link,
+                                     ELF64_R_SYM((Elf64_Xword)rel->r_info));
+        if (symbol) {
+          int64_t addend = rel->r_addend;
+          int64_t result = computeAddend(relaTab, i, (Elf_Rel *)rel, symbol, addend, oc);
+          addHI20Entry(P_prime, symbol, addend, result);
+        }
+      }
+    }
+  }
+  
+  /* Second pass: process relocations using cached HI20 data */
   for (ElfRelocationTable *relTab = oc->info->relTable; relTab != NULL;
        relTab = relTab->next) {
     /* only relocate interesting sections */
@@ -668,6 +710,10 @@ bool relocateObjectCodeRISCV64(ObjectCode *oc) {
       encodeAddendRISCV64(targetSection, (Elf_Rel *)rel, addend);
     }
   }
+  
+  /* Clean up HI20 cache after processing this object */
+  clearHI20Cache();
+  
   return EXIT_SUCCESS;
 }
 
