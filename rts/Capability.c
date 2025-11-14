@@ -70,6 +70,13 @@ uint32_t n_numa_nodes;
 // Map logical NUMA node to OS node numbers
 uint32_t numa_map[MAX_NUMA_NODES];
 
+#if !defined(THREADED_RTS)
+// Mutex to synchronize FFI boundaries (callback entry and function return)
+// in the non-threaded RTS. This prevents race conditions when callbacks
+// and FFI returns happen simultaneously.
+Mutex ffi_boundary_lock;
+#endif
+
 /* Let foreign code get the current Capability -- assuming there is one!
  * This is useful for unsafe foreign calls because they are called with
  * the current Capability held, but they are not passed it.
@@ -426,6 +433,10 @@ void initCapabilities (void)
     capabilities[0] = &MainCapability;
 
     initCapability(&MainCapability, 0);
+
+    // Initialize the FFI boundary lock for the non-threaded RTS
+    // This lock prevents race conditions between FFI callbacks and function returns
+    initMutex(&ffi_boundary_lock);
 
 #endif
 
