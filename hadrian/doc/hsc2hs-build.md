@@ -93,9 +93,12 @@ The copy rule is defined in `hadrian/src/Rules/Generate.hs`:
 prefix -/- "template-hsc.h" <~ return (pkgPath hsc2hs -/- "data")
 ```
 
-This template is needed before building `hsc2hs` itself, as specified in `hadrian/src/Rules/Program.hs`:
+This template is needed before building `hsc2hs` itself, as specified in `hadrian/src/Rules/Program.hs`. 
+The `buildProgram` function is responsible for building executable programs in Hadrian, and it has special 
+handling for `hsc2hs`:
 
 ```haskell
+-- Main function responsible for building program executables in Hadrian
 buildProgram :: FilePath -> Context -> [(Resource, Int)] -> Action ()
 buildProgram bin ctx@(Context{..}) rs = do
   when (package == hsc2hs) $ do
@@ -211,11 +214,13 @@ To build `hsc2hs`:
 
 ### What Depends on hsc2hs
 
-Many GHC packages use `hsc2hs` to process `.hsc` files:
-- `unix` (a core library with many FFI bindings)
-- `directory` (depends on `unix`)
-- `Win32` (on Windows)
-- Various other packages with C FFI bindings
+Many GHC packages use `hsc2hs` to process `.hsc` files that contain C FFI bindings:
+- `unix` - Core library providing POSIX functionality (uses hsc2hs extensively for system calls and types)
+- `directory` - File system operations (depends on `unix`)
+- `Win32` - Windows-specific APIs (on Windows platforms)
+- `network` - Networking library (socket types and constants)
+- `time` - Time and date handling (system time APIs)
+- Many third-party packages that interface with C libraries
 
 ## Summary
 
