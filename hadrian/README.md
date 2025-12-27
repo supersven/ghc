@@ -392,6 +392,7 @@ Additional documentation
 * [Flavours](doc/flavours.md) - Detailed documentation on build flavours and transformers
 * [User Settings](doc/user-settings.md) - How to customize the build
 * [Testsuite](doc/testsuite.md) - Running and configuring the GHC testsuite
+* [Debugging](doc/debugging.md) - Debugging the Hadrian build system
 * [Cross-compilation](doc/cross-compile.md) - Building GHC as a cross-compiler
 * [Windows](doc/windows.md) - Windows-specific build instructions
 
