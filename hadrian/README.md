@@ -382,12 +382,19 @@ Current limitations
 The new build system still lacks many important features:
 * Dynamic linking on Windows is not supported [#343][dynamic-windows-issue].
 
-Cheatsheet for Make users
--------------------------
+Additional documentation
+------------------------
 
-You can find a cheatsheet-style document that shows the Hadrian equivalents of
-commands that GHC users are used to run with the Make build system
-[here](doc/make.md).
+* [Cheatsheet for Make users](doc/make.md) - Shows Hadrian equivalents of
+  commands that GHC users are used to run with the Make build system
+* [How hsc2hs is built](doc/hsc2hs-build.md) - Explains how the `hsc2hs` utility
+  is built, including build stages, Hadrian targets, and its role in binary distributions
+* [Flavours](doc/flavours.md) - Detailed documentation on build flavours and transformers
+* [User Settings](doc/user-settings.md) - How to customize the build
+* [Testsuite](doc/testsuite.md) - Running and configuring the GHC testsuite
+* [Debugging](doc/debugging.md) - Debugging the Hadrian build system
+* [Cross-compilation](doc/cross-compile.md) - Building GHC as a cross-compiler
+* [Windows](doc/windows.md) - Windows-specific build instructions
 
 Acknowledgements
 ----------------
